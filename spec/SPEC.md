@@ -1,6 +1,6 @@
 # agent-log-replayer — 仕様書 (SPEC)
 
-**バージョン:** 0.1.0  
+**バージョン:** 0.1.1  
 **最終更新:** 2026-04-19  
 **リポジトリ:** opaopa6969/agent-log-replayer
 
@@ -1091,7 +1091,157 @@ GET /api/status
 
 ---
 
-## 付録 A — ファイル構成マップ
+## 付録 A — アーキテクチャ図
+
+### A.0 broker ← replayer アーキテクチャ
+
+```mermaid
+graph TB
+    subgraph broker["agent-log-broker"]
+        B_COLLECT["ログ収集・パース"]
+        B_SEC["セキュリティ検知"]
+        B_REG["コンシューマレジストリ"]
+    end
+
+    subgraph replayer["agent-log-replayer (このシステム)"]
+        R_CB["POST /api/broker/callback"]
+        R_SM["SessionManager"]
+        R_DB[("SQLite\nsessions.db")]
+        R_REST["REST API\n/api/sessions/*"]
+        R_WS["WebSocket\nws://…/ws"]
+    end
+
+    subgraph frontend["ブラウザ (React SPA)"]
+        F_SL["SessionList"]
+        F_SP["SessionPlayer"]
+        F_TV["TerminalView (TODO)"]
+        F_TLV["TimelineView (TODO)"]
+        F_SEC["SecurityPanel (TODO)"]
+    end
+
+    B_COLLECT --> B_SEC
+    B_SEC --> B_REG
+    B_REG -->|"POST /api/broker/callback\nBrokerEvent (JSON)"| R_CB
+    R_CB --> R_SM
+    R_SM --> R_DB
+    R_SM --> R_REST
+    R_SM --> R_WS
+    R_REST -->|"GET /api/sessions/*"| F_SP
+    R_WS -->|"ws events"| F_SL
+    R_WS -->|"ws events"| F_SP
+    F_SP --> F_TV
+    F_SP --> F_TLV
+    F_SP --> F_SEC
+```
+
+---
+
+### A.1 HTTP コールバックフロー (sequenceDiagram)
+
+```mermaid
+sequenceDiagram
+    participant Broker as agent-log-broker
+    participant CB as POST /api/broker/callback
+    participant SM as SessionManager
+    participant DB as SQLite
+    participant WS as WebSocketServer
+    participant Client as ブラウザ (React SPA)
+
+    Broker->>CB: POST BrokerEvent (JSON)
+    CB->>CB: バリデーション (_broker / _session / type)
+    alt バリデーション失敗
+        CB-->>Broker: 400 Bad Request
+    end
+    CB->>SM: handleEvent(event)
+    SM->>DB: addMessage / upsertSession
+    DB-->>SM: ok
+    SM->>SM: notifyListeners(event, session)
+    SM->>WS: onEvent(event, session)
+    WS->>WS: 購読フィルタ判定
+    WS->>Client: send({ type:"event", sessionId, event })
+    CB-->>Broker: 200 { ok: true }
+    Client->>Client: Zustand 状態更新 → 再レンダリング
+```
+
+---
+
+### A.2 リプレイ再生ライフサイクル (stateDiagram-v2)
+
+```mermaid
+stateDiagram-v2
+    [*] --> stopped : selectSession()
+
+    stopped --> playing : play()
+
+    playing --> paused : pause()
+    playing --> playing : advance() / setTimeout
+    playing --> finished : currentIndex >= totalMessages-1
+
+    paused --> playing : play()
+    paused --> paused : seek / prev / next / keyboard
+
+    finished --> stopped : selectSession() (別セッション選択)
+    finished --> playing : play() (先頭から再生)
+
+    note right of playing
+        advance() が setTimeout で
+        800ms / speed 間隔で実行
+    end note
+
+    note right of paused
+        Seek バー / ArrowLeft /
+        ArrowRight / Home / End で
+        currentIndex を変更可能
+    end note
+```
+
+---
+
+### A.3 SQLite ER 図 (erDiagram)
+
+```mermaid
+erDiagram
+    sessions {
+        TEXT session_id PK
+        TEXT agent_type
+        TEXT project_path
+        TEXT status
+        TEXT first_message_at
+        TEXT last_message_at
+        INTEGER message_count
+        TEXT created_at
+        TEXT updated_at
+    }
+
+    messages {
+        INTEGER id PK
+        TEXT session_id FK
+        INTEGER message_index
+        TEXT role
+        TEXT text
+        TEXT tool_uses
+        TEXT tool_results
+        TEXT thinking
+        TEXT timestamp
+        TEXT created_at
+    }
+
+    security_events {
+        INTEGER id PK
+        TEXT session_id FK
+        INTEGER message_index
+        TEXT flag_type
+        TEXT detail
+        TEXT created_at
+    }
+
+    sessions ||--o{ messages : "has"
+    sessions ||--o{ security_events : "has"
+```
+
+---
+
+## 付録 B — ファイル構成マップ
 
 ```
 agent-log-replayer/
@@ -1142,7 +1292,7 @@ agent-log-replayer/
 
 ---
 
-## 付録 B — 型定義リファレンス
+## 付録 C — 型定義リファレンス
 
 ### B.1 BrokerEvent 関連型 (src/consumer/broker-client.ts)
 
@@ -1261,7 +1411,7 @@ interface ServerConfig {
 
 ---
 
-## 付録 C — 既知の問題一覧 (BACKLOG)
+## 付録 D — 既知の問題一覧 (BACKLOG)
 
 | ID | 説明 | 優先度 | 影響ファイル |
 |----|------|--------|-------------|
@@ -1280,7 +1430,7 @@ interface ServerConfig {
 
 ---
 
-## 付録 D — データフロー詳細
+## 付録 E — データフロー詳細
 
 ### D.1 メッセージ受信から WebSocket 配信までのフロー
 
@@ -1358,7 +1508,7 @@ main() in index.ts
 
 ---
 
-## 付録 E — 開発ガイド
+## 付録 F — 開発ガイド
 
 ### E.1 ローカル開発環境セットアップ
 
@@ -1435,7 +1585,7 @@ broker が新しいイベント種別 (例: `session.resumed`) を追加した�
 
 ---
 
-## 付録 F — セキュリティ考慮事項
+## 付録 G — セキュリティ考慮事項
 
 ### F.1 broker callback エンドポイントの認証
 
@@ -1469,7 +1619,7 @@ if (sig !== expected) {
 
 ---
 
-## 付録 G — 用語集
+## 付録 H — 用語集
 
 | 用語 | 定義 |
 |------|------|
@@ -1499,8 +1649,9 @@ if (sig !== expected) {
 
 ---
 
-## 付録 H — 変更履歴
+## 付録 I — 変更履歴
 
 | バージョン | 日付 | 変更内容 |
 |-----------|------|---------|
 | 0.1.0 | 2026-04-19 | 初版作成。12 セクション + 付録 A〜G |
+| 0.1.1 | 2026-04-19 | 付録 A にアーキテクチャ図 (graph TB / sequenceDiagram / stateDiagram-v2 / erDiagram) を追加。旧付録 A〜G を B〜I に繰り下げ |
