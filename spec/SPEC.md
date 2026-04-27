@@ -37,15 +37,15 @@ agent-log-replayer は、**agent-log-broker** が配信する LLM エージェ�
 
 ### 1.2 システム位置づけ
 
-```
-agent-log-broker
-       │  POST /api/broker/callback (BrokerEvent)
-       ▼
-agent-log-replayer (このシステム)
-       │  WebSocket ws://…/ws
-       │  GET /api/sessions/*
-       ▼
-ブラウザ (React SPA)
+```mermaid
+graph TB
+    A["agent-log-broker"]
+    B["agent-log-replayer<br/>(このシステム)"]
+    C["ブラウザ (React SPA)"]
+
+    A -->|"POST /api/broker/callback (BrokerEvent)"| B
+    B -->|"WebSocket ws://…/ws"| C
+    B -->|"GET /api/sessions/*"| C
 ```
 
 agent-log-broker はイベントの収集・パース・セキュリティ検知を担当する。replayer はそれらを**表示・再生**することのみを担当し、パース処理を持たない。
@@ -322,25 +322,14 @@ CREATE INDEX IF NOT EXISTS idx_security_session
 
 ### 4.1 セッションライフサイクル
 
-```
-           session.discovered
-                  │
-                  ▼
-            ┌──────────┐
-            │  active  │◄──── message (自動遷移)
-            └──────────┘
-               │     │
-   session.idle│     │session.lost
-               ▼     ▼
-          ┌──────┐ ┌──────┐
-          │ idle │ │ lost │
-          └──────┘ └──────┘
-               │
-        (再起動後ロード)
-               ▼
-          ┌──────────┐
-          │ archived │
-          └──────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> active : session.discovered
+    active --> active : message (自動遷移)
+    active --> idle : session.idle
+    active --> lost : session.lost
+    idle --> lost : session.lost
+    idle --> archived : 再起動後ロード
 ```
 
 **状態遷移ルール:**
@@ -357,32 +346,16 @@ CREATE INDEX IF NOT EXISTS idx_security_session
 
 ### 4.2 リプレイ再生ライフサイクル
 
-```
-         選択 (selectSession)
-                │
-                ▼
-         ┌───────────┐
-         │  stopped  │
-         │ index = 0 │
-         └───────────┘
-              │
-           play()
-              │
-              ▼
-         ┌──────────┐
-    ┌────│ playing  │────┐
-    │    └──────────┘    │
- pause()   │ advance     │ index = totalMessages-1
-    │      │ (setTimeout)│
-    ▼      ▼             ▼
- ┌──────────┐       ┌──────────┐
- │ paused   │       │ finished │
- └──────────┘       └──────────┘
-    │
- play()
-    │
-    ▼
- playing (再開)
+```mermaid
+stateDiagram-v2
+    [*] --> stopped : selectSession()
+    stopped --> playing : play()
+    playing --> paused : pause()
+    playing --> playing : advance() / setTimeout
+    playing --> finished : index = totalMessages-1
+    paused --> playing : play() (再開)
+    finished --> stopped : selectSession() (別セッション)
+    finished --> playing : play() (先頭から再生)
 ```
 
 **state フィールド:** `PlaybackState.playing: boolean` + `currentIndex: number`
@@ -405,22 +378,29 @@ CREATE INDEX IF NOT EXISTS idx_security_session
 
 **handleEvent フロー:**
 
-```
-handleEvent(event)
-  ├─ event.type === "session.discovered" → ensureSession (新規作成または既存確認)
-  ├─ event.type === "message"            → handleMessage
-  │     ├─ ensureSession
-  │     ├─ messages.push(event.message)
-  │     ├─ messageCount++
-  │     ├─ lastMessageAt 更新
-  │     ├─ firstMessageAt 初回設定
-  │     ├─ status = "active"
-  │     ├─ store.addMessage(...)
-  │     ├─ store.upsertSession(...)
-  │     └─ securityFlags / bannedWordHits をインメモリに蓄積
-  ├─ event.type === "session.idle"       → updateStatus("idle")
-  └─ event.type === "session.lost"       → updateStatus("lost")
-  └─ notifyListeners(event, session)  ← 全イベントで実行
+```mermaid
+flowchart TD
+    HE["handleEvent(event)"]
+    HE --> CHK{event.type}
+    CHK -->|session.discovered| ES["ensureSession()<br/>新規作成または既存確認"]
+    CHK -->|message| HM["handleMessage()"]
+    CHK -->|session.idle| UI["updateStatus('idle')"]
+    CHK -->|session.lost| UL["updateStatus('lost')"]
+
+    HM --> ES2["ensureSession()"]
+    HM --> MP["messages.push(event.message)"]
+    HM --> MC["messageCount++"]
+    HM --> LM["lastMessageAt 更新"]
+    HM --> FM["firstMessageAt 初回設定"]
+    HM --> SA["status = 'active'"]
+    HM --> AM["store.addMessage(...)"]
+    HM --> US["store.upsertSession(...)"]
+    HM --> SEC["securityFlags / bannedWordHits<br/>をインメモリに蓄積"]
+
+    ES --> NL["notifyListeners(event, session)"]
+    HM --> NL
+    UI --> NL
+    UL --> NL
 ```
 
 **実装ファイル:** `src/consumer/session-manager.ts`
@@ -1106,9 +1086,9 @@ graph TB
     subgraph replayer["agent-log-replayer (このシステム)"]
         R_CB["POST /api/broker/callback"]
         R_SM["SessionManager"]
-        R_DB[("SQLite\nsessions.db")]
-        R_REST["REST API\n/api/sessions/*"]
-        R_WS["WebSocket\nws://…/ws"]
+        R_DB[("SQLite<br/>sessions.db")]
+        R_REST["REST API<br/>/api/sessions/*"]
+        R_WS["WebSocket<br/>ws://…/ws"]
     end
 
     subgraph frontend["ブラウザ (React SPA)"]
@@ -1121,7 +1101,7 @@ graph TB
 
     B_COLLECT --> B_SEC
     B_SEC --> B_REG
-    B_REG -->|"POST /api/broker/callback\nBrokerEvent (JSON)"| R_CB
+    B_REG -->|"POST /api/broker/callback<br/>BrokerEvent (JSON)"| R_CB
     R_CB --> R_SM
     R_SM --> R_DB
     R_SM --> R_REST
@@ -1434,74 +1414,54 @@ interface ServerConfig {
 
 ### D.1 メッセージ受信から WebSocket 配信までのフロー
 
-```
-[broker]
-  POST /api/broker/callback
-  Body: BrokerEvent (JSON)
-         │
-         ▼
-[routes.ts: POST /api/broker/callback]
-  1. req.body を BrokerEvent としてキャスト
-  2. _broker / _session / type の存在を検証
-  3. sessionManager.handleEvent(event) を呼び出す
-         │
-         ▼
-[session-manager.ts: handleEvent()]
-  4. event.type に応じて分岐:
-     - "session.discovered" → ensureSession() でセッション作成
-     - "message"            → handleMessage() でメッセージ追加
-     - "session.idle"       → updateStatus("idle")
-     - "session.lost"       → updateStatus("lost")
-  5. notifyListeners(event, session) を呼び出す
-         │
-         ▼
-[websocket.ts: SessionEventListener]
-  6. 全接続クライアントを走査
-  7. client.subscribedSessionId が null または一致する場合:
-     ws.send(JSON.stringify({ type: "event", sessionId, event }))
-         │
-         ▼
-[sessionStore.ts (Zustand): ws.onmessage]
-  8. data.type === "event" の場合:
-     - 一致するセッションの messageCount++ / status = "active"
-         │
-         ▼
-[React: SessionList, SessionPlayer]
-  9. Zustand の状態変化で再レンダリング
+```mermaid
+flowchart TD
+    BRK["broker<br/>POST /api/broker/callback<br/>Body: BrokerEvent (JSON)"]
+    RT["routes.ts: POST /api/broker/callback<br/>1. req.body を BrokerEvent としてキャスト<br/>2. _broker / _session / type の存在を検証<br/>3. sessionManager.handleEvent(event) を呼び出す"]
+    SM["session-manager.ts: handleEvent()<br/>4. event.type に応じて分岐<br/>5. notifyListeners(event, session) を呼び出す"]
+    WS["websocket.ts: SessionEventListener<br/>6. 全接続クライアントを走査<br/>7. subscribedSessionId が null または一致する場合 send()"]
+    ZS["sessionStore.ts (Zustand): ws.onmessage<br/>8. data.type === 'event' の場合<br/>messageCount++ / status = 'active'"]
+    RE["React: SessionList, SessionPlayer<br/>9. Zustand の状態変化で再レンダリング"]
+
+    BRK --> RT --> SM --> WS --> ZS --> RE
 ```
 
 ### D.2 メッセージ永続化フロー
 
-```
-sessionManager.handleMessage(event)
-         │
-         ├─ store.addMessage(sessionId, event.message)
-         │    │
-         │    ├─ SELECT COUNT(*) WHERE session_id = ?  (message_index 算出)
-         │    └─ INSERT INTO messages (...)
-         │
-         └─ store.upsertSession(session)
-              │
-              └─ INSERT ... ON CONFLICT DO UPDATE SET ...
+```mermaid
+flowchart TD
+    HM["sessionManager.handleMessage(event)"]
+    AM["store.addMessage(sessionId, event.message)"]
+    CNT["SELECT COUNT(*) WHERE session_id = ?<br/>(message_index 算出)"]
+    INS["INSERT INTO messages (...)"]
+    US["store.upsertSession(session)"]
+    UPS["INSERT ... ON CONFLICT DO UPDATE SET ..."]
+
+    HM --> AM
+    AM --> CNT --> INS
+    HM --> US --> UPS
 ```
 
 ### D.3 起動時のセッション復元フロー
 
-```
-main() in index.ts
-  │
-  ├─ new SessionStore(config.dbPath)
-  │    └─ migrate() → CREATE TABLE IF NOT EXISTS ...
-  │
-  ├─ new SessionManager(store)
-  │
-  ├─ [オプション] sessionManager.loadFromStore()
-  │    ├─ store.listSessions() → StoredSession[]
-  │    └─ 各 session を Map に "archived" ステータスで復元
-  │         └─ store.getMessages(sessionId) → AgentMessage[]
-  │
-  └─ brokerClient.subscribe()
-       └─ POST {BROKER_URL}/api/subscribe
+```mermaid
+flowchart TD
+    MAIN["main() in index.ts"]
+    SS["new SessionStore(config.dbPath)"]
+    MIG["migrate()<br/>CREATE TABLE IF NOT EXISTS ..."]
+    SM["new SessionManager(store)"]
+    LFS["sessionManager.loadFromStore() (オプション)"]
+    LST["store.listSessions() → StoredSession[]"]
+    ARC["各 session を Map に<br/>'archived' ステータスで復元"]
+    GM["store.getMessages(sessionId) → AgentMessage[]"]
+    SUB["brokerClient.subscribe()"]
+    POST["POST {BROKER_URL}/api/subscribe"]
+
+    MAIN --> SS --> MIG
+    MAIN --> SM
+    MAIN --> LFS
+    LFS --> LST --> ARC --> GM
+    MAIN --> SUB --> POST
 ```
 
 **注記:** `loadFromStore()` は `main()` 内で現在**呼び出されていない**。セッションはサーバー起動後に broker からの新規イベントが届いた時点で初めてメモリに読み込まれる。再起動後に既存セッションを即時表示するには `loadFromStore()` の呼び出しを `main()` に追加する必要がある。
