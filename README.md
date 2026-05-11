@@ -74,24 +74,13 @@ npm run dev:frontend
 
 Three layers:
 
-```
-Layer 1 — Consumer
-  broker-client.ts    subscribes to agent-log-broker (full_stream mode)
-  session-manager.ts  maintains per-session state in memory
-
-        │ BrokerEvent (HTTP callback)
-        ▼
-
-Layer 2 — Storage
-  session-store.ts    persists sessions + messages + security events to SQLite
-
-        │ query + realtime notify
-        ▼
-
-Layer 3 — UI
-  routes.ts           REST API (sessions, timeline, status)
-  websocket.ts        WebSocket real-time event streaming
-  React SPA           SessionList / SessionPlayer / TerminalView / TimelineView / SecurityPanel
+```mermaid
+flowchart TB
+    L1["Layer 1 — Consumer<br/>broker-client.ts: subscribes to agent-log-broker (full_stream mode)<br/>session-manager.ts: maintains per-session state in memory"]
+    L2["Layer 2 — Storage<br/>session-store.ts: persists sessions + messages + security events to SQLite"]
+    L3["Layer 3 — UI<br/>routes.ts: REST API (sessions, timeline, status)<br/>websocket.ts: WebSocket real-time event streaming<br/>React SPA: SessionList / SessionPlayer / TerminalView / TimelineView / SecurityPanel"]
+    L1 -->|BrokerEvent (HTTP callback)| L2
+    L2 -->|query + realtime notify| L3
 ```
 
 See [docs/architecture.md](docs/architecture.md) for full detail.
@@ -102,19 +91,13 @@ See [docs/architecture.md](docs/architecture.md) for full detail.
 
 agent-log-replayer registers as a **consumer** of agent-log-broker with `mode: full_stream`.
 
-```
-agent-log-broker                    agent-log-replayer
-┌──────────────┐   HTTP callback   ┌──────────────────┐
-│ FileWatcher  │ ────────────────> │ broker-client.ts  │
-│ Parse/Redact │   BrokerEvent     │ session-manager   │
-│ Distribute   │                   │ SQLite + WS       │
-└──────────────┘                   └──────────────────┘
-                                          │
-                                          ▼ WebSocket
-                                   ┌──────────────────┐
-                                   │ React Web UI      │
-                                   │ (browser)         │
-                                   └──────────────────┘
+```mermaid
+flowchart LR
+    Broker["agent-log-broker<br/>- FileWatcher<br/>- Parse/Redact<br/>- Distribute"]
+    Consumer["agent-log-replayer<br/>- broker-client.ts<br/>- session-manager<br/>- SQLite + WS"]
+    UI["React Web UI (browser)"]
+    Broker -->|HTTP callback / BrokerEvent| Consumer
+    Consumer -->|WebSocket| UI
 ```
 
 ### BrokerEvent types

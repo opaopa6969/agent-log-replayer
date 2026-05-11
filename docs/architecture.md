@@ -16,26 +16,13 @@ No parsing logic lives in the replayer. All parsing and redaction is handled ups
 
 ## 2. Three-Layer Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Layer 1: Consumer                                        │
-│   broker-client.ts   — HTTP callback subscription mgmt  │
-│   session-manager.ts — in-memory session state          │
-└──────────────────────────┬──────────────────────────────┘
-                           │ BrokerEvent
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│ Layer 2: Storage (SQLite)                                │
-│   session-store.ts   — sessions + messages + security   │
-└──────────────────────────┬──────────────────────────────┘
-                           │ query + realtime notify
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│ Layer 3: UI                                              │
-│   routes.ts          — Express REST API                  │
-│   websocket.ts       — WebSocket real-time streaming    │
-│   React SPA          — SessionList/Player/views         │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    L1["Layer 1: Consumer<br/>broker-client.ts — HTTP callback subscription mgmt<br/>session-manager.ts — in-memory session state"]
+    L2["Layer 2: Storage (SQLite)<br/>session-store.ts — sessions + messages + security"]
+    L3["Layer 3: UI<br/>routes.ts — Express REST API<br/>websocket.ts — WebSocket real-time streaming<br/>React SPA — SessionList/Player/views"]
+    L1 -->|BrokerEvent| L2
+    L2 -->|query + realtime notify| L3
 ```
 
 ---

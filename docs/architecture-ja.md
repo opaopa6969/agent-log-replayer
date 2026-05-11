@@ -16,26 +16,13 @@ agent-log-replayer は agent-log-broker のコンシューマーとして動作�
 
 ## 2. 3 層アーキテクチャ
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Layer 1: Consumer                                        │
-│   broker-client.ts   — HTTP callback サブスクリプション管理 │
-│   session-manager.ts — メモリ上のセッション状態管理        │
-└──────────────────────────┬──────────────────────────────┘
-                           │ BrokerEvent
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│ Layer 2: Storage (SQLite)                                │
-│   session-store.ts   — セッション + メッセージ + セキュリティ │
-└──────────────────────────┬──────────────────────────────┘
-                           │ クエリ + リアルタイム通知
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│ Layer 3: UI                                              │
-│   routes.ts          — Express REST API                  │
-│   websocket.ts       — WebSocket リアルタイムストリーミング  │
-│   React SPA          — SessionList/Player/各ビュー       │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    L1["Layer 1: Consumer<br/>broker-client.ts — HTTP callback サブスクリプション管理<br/>session-manager.ts — メモリ上のセッション状態管理"]
+    L2["Layer 2: Storage (SQLite)<br/>session-store.ts — セッション + メッセージ + セキュリティ"]
+    L3["Layer 3: UI<br/>routes.ts — Express REST API<br/>websocket.ts — WebSocket リアルタイムストリーミング<br/>React SPA — SessionList/Player/各ビュー"]
+    L1 -->|BrokerEvent| L2
+    L2 -->|クエリ + リアルタイム通知| L3
 ```
 
 ---
