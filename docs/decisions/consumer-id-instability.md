@@ -1,8 +1,9 @@
 # Decision: consumerId Instability on Restart
 
-**Status:** BACKLOG — known bug, no fix implemented  
-**Filed:** 2026-04-19  
-**Affects:** `src/consumer/broker-client.ts`, broker consumer registry
+**Status:** Implemented (2026-08-01) — `getOrCreateConsumerId()` added to `src/consumer/broker-client.ts`; `src/index.ts` loads `CONSUMER_ID` env override, otherwise persists to `./data/consumer-id.txt`.
+**Filed:** 2026-04-19
+**Resolved:** 2026-08-01 (GitHub issue #10)
+**Affects:** `src/consumer/broker-client.ts`, `src/index.ts`, broker consumer registry
 
 ---
 
@@ -73,6 +74,29 @@ const client = new BrokerClient({
 ```
 
 This is not implemented in the current codebase. The `src/index.ts` entry point uses the default (unstable) ID.
+
+## Resolution (2026-08-01)
+
+Implemented `getOrCreateConsumerId(idFilePath)` in `src/consumer/broker-client.ts`:
+
+```typescript
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+
+export function getOrCreateConsumerId(idFilePath: string): string {
+  if (existsSync(idFilePath)) {
+    return readFileSync(idFilePath, "utf-8").trim();
+  }
+  const id = `agent-log-replayer-${randomUUID()}`;
+  mkdirSync(dirname(idFilePath), { recursive: true });
+  writeFileSync(idFilePath, id, "utf-8");
+  return id;
+}
+```
+
+`src/index.ts` now passes `config.consumerId ?? getOrCreateConsumerId("data/consumer-id.txt")` to `BrokerClient`, where `config.consumerId` is loaded from the `CONSUMER_ID` environment variable.
+
+Priority order: `CONSUMER_ID` env var → persisted file `./data/consumer-id.txt` → newly generated UUID.
 
 ## BACKLOG
 

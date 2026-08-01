@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `getOrCreateConsumerId()` in `BrokerClient` — persists `consumerId` to `./data/consumer-id.txt` so it is reused across restarts; `CONSUMER_ID` env var override supported (issue #10, BUG-001).
+- `loadFromStore()` is now called in `src/index.ts` `main()` before broker subscribe, restoring archived sessions on startup (issue #8, TECH-005).
+- SPA fallback `app.get("*", ...)` after `express.static("frontend/dist")` so direct URLs like `/sessions/xxx` resolve to `index.html` (issue #12, BUG-003).
+- `// SYNC WITH broker/src/types/broker-event.ts` comments on all duplicated types in `broker-client.ts` (Option C, issue #15, TECH-001).
+
+### Changed
+
+- `src/index.ts` `loadConfig()` now reads `CONSUMER_ID` env var and passes `consumerId` to `BrokerClient`.
+
+### Documentation
+
+- `docs/decisions/consumer-id-instability.md` Status: BACKLOG → Implemented.
+- `docs/decisions/broker-event-type-duplication.md` Status: Open → Option C Implemented.
+- `spec/SPEC.md` §10.1/§11.1 updated: tests 0 → 45 cases / 5 files.
+- `spec/SPEC.md` §10.2/§10.4/§5.3/付録D/付録E D.3 updated to reflect resolutions.
+
 ## [0.1.0] - 2026-04-19
 
 ### Added

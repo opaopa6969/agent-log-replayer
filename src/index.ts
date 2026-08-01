@@ -10,7 +10,7 @@
 import express from "express";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
-import { BrokerClient } from "./consumer/broker-client.js";
+import { BrokerClient, getOrCreateConsumerId } from "./consumer/broker-client.js";
 import { SessionManager } from "./consumer/session-manager.js";
 import { SessionStore } from "./storage/session-store.js";
 import { createRoutes } from "./api/routes.js";
@@ -21,6 +21,7 @@ export interface ServerConfig {
   brokerUrl: string;
   callbackUrl: string;
   dbPath: string;
+  consumerId?: string;
 }
 
 function loadConfig(): ServerConfig {
@@ -31,6 +32,7 @@ function loadConfig(): ServerConfig {
       process.env.CALLBACK_URL ??
       "http://localhost:3200/api/broker/callback",
     dbPath: process.env.DB_PATH ?? "./data/sessions.db",
+    consumerId: process.env.CONSUMER_ID,
   };
 }
 
@@ -42,6 +44,9 @@ async function main(): Promise<void> {
 
   // Session manager (in-memory state + persistence)
   const sessionManager = new SessionManager(store);
+
+  // Restore archived sessions from storage before subscribing to broker
+  await sessionManager.loadFromStore();
 
   // Express app
   const app = express();
@@ -58,6 +63,7 @@ async function main(): Promise<void> {
   const brokerClient = new BrokerClient({
     brokerUrl: config.brokerUrl,
     callbackUrl: config.callbackUrl,
+    consumerId: config.consumerId ?? getOrCreateConsumerId("data/consumer-id.txt"),
   });
 
   // REST API routes
@@ -66,6 +72,9 @@ async function main(): Promise<void> {
 
   // Serve frontend static files in production
   app.use(express.static("frontend/dist"));
+
+  // SPA fallback: return index.html for non-API routes (#12)
+  app.get("*", (_req, res) => res.sendFile("frontend/dist/index.html"));
 
   // Subscribe to broker on startup
   try {

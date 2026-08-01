@@ -471,7 +471,7 @@ interface BannedWordHit {
 
 ### 5.3 BrokerEvent 型二重定義問題
 
-**ステータス: BACKLOG — 未解決**
+**ステータス: Option C Implemented (2026-08-01, issue #15)**
 
 `BrokerEvent`, `AgentMessage`, `BrokerEnvelope`, `SessionMeta`, `IndexMeta` は `src/consumer/broker-client.ts` にローカル定義されている。agent-log-broker の正規型定義と共有パッケージが存在しないため、手動同期が必要。
 
@@ -492,7 +492,7 @@ interface BannedWordHit {
 | B — JSON Schema から型生成 | broker が JSON Schema を公開し、`json-schema-to-typescript` で生成 | ★★ |
 | C — コメントによる手動同期 | `// SYNC WITH broker/src/types/broker-event.ts` を追記して人手で追跡 | ★ |
 
-現状は Option C も実施されていない。詳細: `docs/decisions/broker-event-type-duplication.md`
+2026-08-01 時点で Option C を実施済み。各型に `// SYNC WITH broker/src/types/broker-event.ts` コメントを付与。Option A は別 issue で計画。詳細: `docs/decisions/broker-event-type-duplication.md`
 
 ---
 
@@ -868,70 +868,44 @@ interface SessionStoreState {
 
 ### 10.1 テスト
 
-**現状:** テストが 0 件。
+**現状:** テスト 45 件 / 5 ファイル (`audit.test.ts`, `diff-renderer.test.ts`, `session-store.test.ts`, `terminal-renderer.test.ts`, `timeline-renderer.test.ts`)。
 
-- `tests/` ディレクトリに `.gitkeep` のみ存在。
-- `package.json` に `"test": "vitest"` スクリプトが定義されているが、テストファイルが存在しない。
+- `package.json` に `"test": "vitest"` スクリプトが定義されている。
 - `vitest` は `devDependencies` に含まれている。
 
-**対象未テスト範囲:**
+**対象テスト状況:**
 
-| コンポーネント | テスト優先度 |
-|---------------|-------------|
-| `session-store.ts` (SQLite CRUD) | 高 |
-| `session-manager.ts` (状態遷移) | 高 |
-| `terminal-renderer.ts` (ANSI 生成) | 中 |
-| `timeline-renderer.ts` (イベント生成) | 中 |
-| `audit.ts` (集計ロジック) | 中 |
-| `broker-client.ts` (HTTP リクエスト) | 低 (要モック) |
-| REST API エンドポイント | 低 (要統合テスト) |
+| コンポーネント | テスト優先度 | 状態 |
+|---------------|-------------|------|
+| `session-store.ts` (SQLite CRUD) | 高 | 実装済み (7 件) |
+| `session-manager.ts` (状態遷移) | 高 | 未実装 |
+| `terminal-renderer.ts` (ANSI 生成) | 中 | 実装済み (8 件) |
+| `timeline-renderer.ts` (イベント生成) | 中 | 実装済み (9 件) |
+| `audit.ts` (集計ロジック) | 中 | 実装済み (9 件) |
+| `diff-renderer.ts` (差分描画) | 中 | 実装済み (12 件) |
+| `broker-client.ts` (HTTP リクエスト) | 低 (要モック) | 未実装 |
+| REST API エンドポイント | 低 (要統合テスト) | 未実装 |
 
 ---
 
 ### 10.2 consumerId 再起動ごと変化バグ
 
-**ステータス: BACKLOG — 既知バグ**
+**ステータス: Implemented (2026-08-01, issue #10)**
+
+`BrokerClient` の `consumerId` は `./data/consumer-id.txt` へ永続化され、再起動時に再利用される。`CONSUMER_ID` 環境変数でオーバーライド可能。優先度: env > file > generate。
 
 ```typescript
-// src/consumer/broker-client.ts
-this.consumerId = config.consumerId ?? `agent-log-replayer-${Date.now()}`;
-```
-
-`Date.now()` は起動のたびに変化するため、再起動ごとに broker に新規コンシューマとして登録される。
-
-**影響:**
-
-1. broker のコンシューマレジストリに起動回数分のステールエントリが蓄積する。
-2. broker がステールコンシューマへの再送を試みる場合、無駄な HTTP リクエストが発生する。
-3. 再起動後に broker のバックログ配信設定が引き継がれない可能性がある。
-
-**再現手順:**
-
-```bash
-npm start   # → agent-log-replayer-1713500000000 として登録
-# Ctrl+C
-npm start   # → agent-log-replayer-1713500001234 として新規登録 (前の登録は残存)
-```
-
-**提案修正:**
-
-```typescript
-// src/consumer/broker-client.ts — 提案実装
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-
-function getOrCreateConsumerId(idFilePath: string): string {
+// src/consumer/broker-client.ts — 実装済み
+export function getOrCreateConsumerId(idFilePath: string): string {
   if (existsSync(idFilePath)) {
     return readFileSync(idFilePath, "utf-8").trim();
   }
-  const id = `agent-log-replayer-${crypto.randomUUID()}`;
+  const id = `agent-log-replayer-${randomUUID()}`;
+  mkdirSync(dirname(idFilePath), { recursive: true });
   writeFileSync(idFilePath, id, "utf-8");
   return id;
 }
 ```
-
-デフォルトパス: `./data/consumer-id.txt`
-
-代替手段: `CONSUMER_ID` 環境変数でのオーバーライドを許可する。
 
 詳細: `docs/decisions/consumer-id-instability.md`
 
@@ -945,7 +919,9 @@ function getOrCreateConsumerId(idFilePath: string): string {
 
 ### 10.4 SPA フォールバック未設定
 
-`frontend/dist` の静的配信に `* → index.html` フォールバックが存在しないため、ブラウザで `/sessions/xxx` のような URL を直接開いた場合に 404 が返る。
+**ステータス: Implemented (2026-08-01, issue #12)**
+
+`frontend/dist` の静的配信後に `app.get("*", (_req, res) => res.sendFile("frontend/dist/index.html"))` の SPA フォールバックを追加済み。`/api/*` と `/ws` は先に登録されたルートで処理されるため影響を受けない。
 
 ---
 
@@ -960,7 +936,7 @@ function getOrCreateConsumerId(idFilePath: string): string {
 
 ### 11.1 現状
 
-テストスイートは**未整備**。`tests/` ディレクトリは空 (`.gitkeep` のみ)。
+テストスイートは 45 件 / 5 ファイル (`audit.test.ts`, `diff-renderer.test.ts`, `session-store.test.ts`, `terminal-renderer.test.ts`, `timeline-renderer.test.ts`)。`session-manager.ts` と API 統合テストは未実装。
 
 ### 11.2 推奨テスト構成
 
@@ -1393,20 +1369,21 @@ interface ServerConfig {
 
 ## 付録 D — 既知の問題一覧 (BACKLOG)
 
-| ID | 説明 | 優先度 | 影響ファイル |
-|----|------|--------|-------------|
-| BUG-001 | consumerId 再起動ごと変化 → broker にステール登録が蓄積 | 中 | `src/consumer/broker-client.ts` |
-| BUG-002 | security_events テーブルに書き込みが行われない → 再起動でセキュリティデータ消失 | 中 | `src/consumer/session-manager.ts`, `src/storage/session-store.ts` |
-| BUG-003 | SPA フォールバック (`* → index.html`) が未設定 → 直接 URL アクセスで 404 | 低 | `src/index.ts` |
-| BUG-004 | realtime / compressed playback mode が uniform と同一動作 | 低 | `frontend/src/components/SessionPlayer.tsx` |
-| TODO-001 | TerminalView の xterm.js 統合 | 高 | `frontend/src/components/TerminalView.tsx` |
-| TODO-002 | TimelineView のタイムラインフェッチ・描画 | 高 | `frontend/src/components/TimelineView.tsx` |
-| TODO-003 | SecurityPanel のセキュリティデータ表示 | 中 | `frontend/src/components/SecurityPanel.tsx` |
-| TODO-004 | テストスイートの整備 (現状 0 件) | 高 | `tests/` |
-| TECH-001 | BrokerEvent 型二重定義 → 共有パッケージまたは型生成へ移行 | 中 | `src/consumer/broker-client.ts` |
-| TECH-002 | broker 再起動後の自動再サブスクライブ機能 | 低 | `src/consumer/broker-client.ts`, `src/index.ts` |
-| TECH-003 | `addMessage` の message_index 採番に `COUNT(*)`使用 → 大量メッセージ時のパフォーマンス劣化 | 低 | `src/storage/session-store.ts` |
-| TECH-004 | セッション削除 API の未実装 → DB の手動管理が必要 | 低 | `src/api/routes.ts`, `src/storage/session-store.ts` |
+| ID | 説明 | 優先度 | 影響ファイル | 状態 |
+|----|------|--------|-------------|------|
+| BUG-001 | consumerId 再起動ごと変化 → broker にステール登録が蓄積 | 中 | `src/consumer/broker-client.ts` | ✅ Resolved (issue #10, 2026-08-01) |
+| BUG-002 | security_events テーブルに書き込みが行われない → 再起動でセキュリティデータ消失 | 中 | `src/consumer/session-manager.ts`, `src/storage/session-store.ts` | OPEN (issue #7) |
+| BUG-003 | SPA フォールバック (`* → index.html`) が未設定 → 直接 URL アクセスで 404 | 低 | `src/index.ts` | ✅ Resolved (issue #12, 2026-08-01) |
+| BUG-004 | realtime / compressed playback mode が uniform と同一動作 | 低 | `frontend/src/components/SessionPlayer.tsx` | OPEN (issue #13) |
+| TODO-001 | TerminalView の xterm.js 統合 | 高 | `frontend/src/components/TerminalView.tsx` | OPEN (issue #9) |
+| TODO-002 | TimelineView のタイムラインフェッチ・描画 | 高 | `frontend/src/components/TimelineView.tsx` | OPEN (issue #9) |
+| TODO-003 | SecurityPanel のセキュリティデータ表示 | 中 | `frontend/src/components/SecurityPanel.tsx` | OPEN (issue #9) |
+| TODO-004 | テストスイートの整備 (現状 45 件) | 高 | `tests/` | 45 件実装済み / session-manager 未実装 |
+| TECH-001 | BrokerEvent 型二重定義 → 共有パッケージまたは型生成へ移行 | 中 | `src/consumer/broker-client.ts` | ✅ Option C Implemented (issue #15, 2026-08-01) |
+| TECH-002 | broker 再起動後の自動再サブスクライブ機能 | 低 | `src/consumer/broker-client.ts`, `src/index.ts` | OPEN |
+| TECH-003 | `addMessage` の message_index 採番に `COUNT(*)`使用 → 大量メッセージ時のパフォーマンス劣化 | 低 | `src/storage/session-store.ts` | OPEN (issue #16) |
+| TECH-004 | セッション削除 API の未実装 → DB の手動管理が必要 | 低 | `src/api/routes.ts`, `src/storage/session-store.ts` | OPEN |
+| TECH-005 | `loadFromStore()` が `main()` から未呼び出し → 過去セッション未復元 | 中 | `src/index.ts` | ✅ Resolved (issue #8, 2026-08-01) |
 
 ---
 
@@ -1464,7 +1441,7 @@ flowchart TD
     MAIN --> SUB --> POST
 ```
 
-**注記:** `loadFromStore()` は `main()` 内で現在**呼び出されていない**。セッションはサーバー起動後に broker からの新規イベントが届いた時点で初めてメモリに読み込まれる。再起動後に既存セッションを即時表示するには `loadFromStore()` の呼び出しを `main()` に追加する必要がある。
+**注記:** `loadFromStore()` は `main()` 内で呼び出し済み (2026-08-01, issue #8)。`src/index.ts` は `SessionManager` 構築後、broker subscribe 前に `await sessionManager.loadFromStore()` を実行し、アーカイブ済みセッションを `archived` ステータスでメモリに復元する。
 
 ---
 
