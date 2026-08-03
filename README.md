@@ -129,7 +129,7 @@ Sessions, messages, and security events are persisted to SQLite via `better-sqli
 | `messages` | All messages ordered by `message_index` per session |
 | `security_events` | Security flags and banned word hits per session |
 
-On startup, `SessionManager.loadFromStore()` restores all previously seen sessions so they appear in the list immediately.
+Previously seen sessions are persisted in SQLite. Note that startup restoration via `SessionManager.loadFromStore()` is not currently wired into the server entry point, so they do not appear in the in-memory session list until restoration is implemented.
 
 ---
 
@@ -246,9 +246,7 @@ See [docs/decisions/consumer-id-instability.md](docs/decisions/consumer-id-insta
 
 ## Tests
 
-**Test count: 0.** The `tests/` directory contains only `.gitkeep`.
-
-No unit tests or integration tests exist yet. `vitest` is configured as the test runner.
+The test suite currently contains 45 unit tests across five test files. Run them with `npm test -- --run`.
 
 ---
 

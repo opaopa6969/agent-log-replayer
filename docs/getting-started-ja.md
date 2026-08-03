@@ -38,8 +38,9 @@ npm start
 以下のようなログが表示されます:
 
 ```
-[replayer] Listening on http://localhost:3200
-[replayer] Subscribed to broker as agent-log-replayer-1713500000000
+agent-log-replayer listening on port 3200
+WebSocket endpoint: ws://localhost:3200/ws
+Subscribed to broker at http://localhost:3100
 ```
 
 ## 4. UI を開く
@@ -68,7 +69,7 @@ claude
 
 ## 7. 過去のセッションを参照する
 
-過去のセッションは起動時に SQLite から読み込まれます。`archived` ステータスでセッションリストに表示されます。
+過去のセッションは SQLite に永続化されます。ただし、現在はサーバーのエントリポイントから `SessionManager.loadFromStore()` が呼び出されていないため、復元処理が実装されるまでセッションリストには表示されません。
 
 アーカイブ済みセッションをクリックして REST API 経由でメッセージを確認できます:
 
@@ -104,4 +105,4 @@ npm run dev:frontend
 
 - **TerminalView**、**TimelineView**、**SecurityPanel** はプレースホルダースタブです — 静的シェルのみレンダリングされます。
 - **consumerId** は再起動ごとに変化します。これにより broker にスタレなコンシューマーレコードが蓄積されます。[decisions/consumer-id-instability.md](decisions/consumer-id-instability.md) を参照してください。
-- **テスト: 0 件。** 自動テストは存在しません。手動検証のみです。
+- 現在のテストスイートには、5 ファイルにまたがる 45 件のユニットテストがあります。`npm test -- --run` で実行できます。
