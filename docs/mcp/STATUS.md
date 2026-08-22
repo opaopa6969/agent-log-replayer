@@ -1,8 +1,8 @@
 # MCP 化ステータス — agent-log-replayer
 
-- **更新日時:** 2026-08-22T13:30:00Z
+- **更新日時:** 2026-08-22T13:36:00Z
 - **namespace:** `replay`
-- **state:** implemented → deploying
+- **state:** registered (deploy 完了)
 
 ## 進捗
 
@@ -22,37 +22,47 @@
   - `express.json()` の前に MCP ハンドラを配置（body 消費問題回避）
   - `loadFromStore()` を起動時に呼ぶ（BUG-003 対策）
   - `checkStatus()` に 3 秒タイムアウト追加
+  - `--experimental-global-webcrypto` フラグ追加（Node 18 で MCP SDK が globalThis.crypto を要求）
 - [x] (C) テスト（`tests/mcp-e2e.test.ts`）— 全 53 テスト合格
 - [x] (C) `volta.service.json`, `deploy/agent-log-replayer.service`, `run.sh`
 - [x] (C) skill（`docs/skills/replay-ingest/SKILL.md`）
 - [x] (C) README に MCP 節追加
+- [x] (D) volta への参加（全完了）
+  - `svc_add` dry-run → confirm:true → services.json 書き込み成功
+  - `gateway_routes_apply` → `replay.unlaxer.org` の backend を `192.168.1.50:3200` に更新、`min_role: MEMBER`、`auth_bypass_paths: /healthz` 追加
+  - prod（192.168.1.50）に `git clone` → `npm install` → `npm run build:server` → `systemctl --user enable --now agent-log-replayer`
+  - `curl http://127.0.0.1:3200/healthz` → 200 ✓
+  - `curl https://replay.unlaxer.org/healthz` → 200 ✓
+  - `catalog__backend_status` で `replay` が `ready`、tools: 5 ✓
 
-### 進行中
+## (D) volta への参加 — 実行記録
 
-- [ ] (D) volta への参加
+### svc_add
 
-## (D) volta への参加 — dry-run 記録
+- **dry-run:** 成功。prod 環境（`192.168.1.50:3200`, systemd）が追加。MCP 項（`namespace: replay`, `port: 3200`, `path: /mcp`, `min_role: MEMBER`）が設定
+- **confirm:true:** 成功（exit: 0）。既存 wsl 環境は維持、prod 環境と MCP 項が追加
 
-### svc_add dry-run
+### gateway_routes_apply
 
-- **結果:** 成功（exit: 0）
-- **変更内容:** prod 環境（`192.168.1.50:3200`, systemd）が追加。MCP 項（`namespace: replay`, `port: 3200`, `path: /mcp`, `min_role: MEMBER`）が設定される
-- **既存の wsl 環境は維持**（上書きなし）
-- **ポート:** 3200（既存 catalog 登録を優先。割当表の 9252 は使用しない。prod の 3200 は空き）
+- **差分:**
+  - `[更新] replay.unlaxer.org.backend: http://192.168.1.8:3200 -> http://192.168.1.50:3200`
+  - `[更新] replay.unlaxer.org.min_role: (なし) -> MEMBER`
+  - `[追加] replay.unlaxer.org.auth_bypass_paths += /healthz`
+- **自分の 1 件以外を含まない**（温存 6 件は手動設定の残置）
+- **confirm:true:** 成功
 
-### gateway_routes_diff
+### prod 配置
 
-- **結果:** 変更 0 件、温存 6 件
-- `replay.unlaxer.org` は既存ルートがそのまま維持される（既に cloudflare 登録済みのため新規ルート不要）
-- 温存 6 件は手動設定として残置（自分の変更ではない）
+- `git clone` → `npm install --legacy-peer-deps` → `npm run build:server` → `systemctl --user daemon-reload && systemctl --user enable --now agent-log-replayer`
+- 初回起動失敗: `run.sh` の `cd "$(dirname "$0")/.."` が親ディレクトリに移動してしまい `dist/index.js` が見つからない → `cd "$(dirname "$0")"` に修正
+- 2 回目起動失敗: MCP SDK が `globalThis.crypto` を要求し Node 18 で未定義 → `--experimental-global-webcrypto` フラグを追加
+- 3 回目起動成功
 
-### 次のステップ
+### 最終確認
 
-1. `svc_add(confirm: true)` で services.json に書き込み
-2. prod でのコード配置と起動（`git clone` + `systemctl --user enable --now`）
-3. `curl http://127.0.0.1:3200/healthz` が 200 になることを確認
-4. `https://replay.unlaxer.org/healthz` が 200 になることを確認
-5. `catalog__backend_status` で `replay` が `ready` になることを確認
+- `http://127.0.0.1:3200/healthz` → 200 `{"ok":true,"name":"agent-log-replayer","version":"0.1.0"}`
+- `https://replay.unlaxer.org/healthz` → 200 `{"ok":true,"name":"agent-log-replayer","version":"0.1.0"}`
+- `catalog__describe_service("agent-log-replayer")` → `backend.status: "ready"`, `tools: 5`, `server.name: "agent-log-replayer"`
 
 ## 既知バグ（今回の対象外）
 
@@ -65,3 +75,4 @@
 1. `replay` と `claude-session-replay` の能力重複。エージェント向きの正をどちらにするか → 暫定: 役割分担（replay=broker リアルタイム、session-replay=ログファイル直接読み取り）
 2. `get_session` の巨大セッション対応。要約モードやメッセージ範囲指定 → 暫定: 全文返却、`get_timeline` で概要を取ってから全文を取るフローを guide で案内
 3. issue-hub 起票失敗（gh CLI 未インストール）。gh CLI 導入後に再起票が必要
+4. Node 18 と `--experimental-global-webcrypto` の依存。Node 20+ では不要だが、prod が Node 18 のため必要。prod の Node アップグレード時にフラグを削除可能
