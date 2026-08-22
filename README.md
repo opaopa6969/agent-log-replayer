@@ -246,7 +246,23 @@ See [docs/decisions/consumer-id-instability.md](docs/decisions/consumer-id-insta
 
 ## Tests
 
-The test suite currently contains 45 unit tests across five test files. Run them with `npm test -- --run`.
+The test suite currently contains 53 tests across six test files (including MCP e2e). Run them with `npm test -- --run`.
+
+---
+
+## MCP
+
+This service is an MCP backend for the [volta-mcp](https://github.com/opaopa6969/volta-mcp) facade.
+
+- **namespace:** `replay`
+- **endpoint:** `http://<host>:3200/mcp` (Streamable HTTP)
+- **health:** `http://<host>:3200/healthz`
+- **spec:** `replay://spec` (machine-readable capabilities)
+- **guide:** `replay://guide` (usage guide)
+- **tools:** `list_sessions`, `get_session`, `get_timeline`, `status`, `audit_summary` (all read-only)
+- **min_role:** MEMBER
+
+See `docs/mcp/DESIGN.md` for the full design and `docs/skills/replay-ingest/SKILL.md` for the ingest procedure.
 
 ---
 
