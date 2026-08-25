@@ -24,6 +24,15 @@ export interface StoredSession {
 
 export class SessionStore {
   private db: Database.Database;
+  // Cached prepared statements. better-sqlite3's prepare() is cheap but not
+  // free; reusing the same Statement avoids repeated SQL parsing and GC
+  // pressure on the Statement objects. Each is created lazily on first use
+  // so the constructor stays side-effect-free for schema setup.
+  private stmtUpsertSession?: Database.Statement;
+  private stmtInsertMessage?: Database.Statement;
+  private stmtNextMessageIndex?: Database.Statement;
+  private stmtGetMessages?: Database.Statement;
+  private stmtListSessions?: Database.Statement;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -89,17 +98,18 @@ export class SessionStore {
     lastMessageAt: string | null;
     messageCount: number;
   }): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO sessions (session_id, agent_type, project_path, status,
-        first_message_at, last_message_at, message_count, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(session_id) DO UPDATE SET
-        status = excluded.status,
-        first_message_at = COALESCE(excluded.first_message_at, sessions.first_message_at),
-        last_message_at = excluded.last_message_at,
-        message_count = excluded.message_count,
-        updated_at = datetime('now')
-    `);
+    const stmt =
+      (this.stmtUpsertSession ??= this.db.prepare(`
+        INSERT INTO sessions (session_id, agent_type, project_path, status,
+          first_message_at, last_message_at, message_count, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(session_id) DO UPDATE SET
+          status = excluded.status,
+          first_message_at = COALESCE(excluded.first_message_at, sessions.first_message_at),
+          last_message_at = excluded.last_message_at,
+          message_count = excluded.message_count,
+          updated_at = datetime('now')
+      `));
 
     stmt.run(
       session.sessionId,
@@ -114,19 +124,29 @@ export class SessionStore {
 
   /** Add a message to a session. */
   addMessage(sessionId: string, message: AgentMessage): void {
-    const count = this.db
-      .prepare("SELECT COUNT(*) as cnt FROM messages WHERE session_id = ?")
-      .get(sessionId) as { cnt: number };
+    // Use MAX(message_index) instead of COUNT(*) to determine the next index.
+    // MAX() resolves to the last entry of idx_messages_session, making it
+    // O(log N) rather than the O(N) index-only scan that COUNT(*) requires.
+    // See SPEC.md §10.5 (TECH-003) for the original hotspot.
+    const idxStmt =
+      (this.stmtNextMessageIndex ??= this.db.prepare(
+        "SELECT COALESCE(MAX(message_index), -1) AS last_idx " +
+          "FROM messages WHERE session_id = ?"
+      ));
+    const row = idxStmt.get(sessionId) as { last_idx: number } | undefined;
 
-    const stmt = this.db.prepare(`
-      INSERT INTO messages (session_id, message_index, role, text,
-        tool_uses, tool_results, thinking, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const nextIndex = (row?.last_idx ?? -1) + 1;
+
+    const stmt =
+      (this.stmtInsertMessage ??= this.db.prepare(`
+        INSERT INTO messages (session_id, message_index, role, text,
+          tool_uses, tool_results, thinking, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `));
 
     stmt.run(
       sessionId,
-      count.cnt,
+      nextIndex,
       message.role,
       message.text ?? null,
       message.toolUses ? JSON.stringify(message.toolUses) : null,
@@ -138,11 +158,16 @@ export class SessionStore {
 
   /** Get all messages for a session. */
   getMessages(sessionId: string): AgentMessage[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM messages WHERE session_id = ? ORDER BY message_index"
-      )
-      .all(sessionId) as Array<{
+    // Select only the columns consumed by the mapper. SELECT * forces
+    // better-sqlite3 to materialize `id`, `created_at`, etc. into JS objects
+    // for every row; narrowing the column list cuts both transfer cost and
+    // V8 object allocation. The prepared statement is cached on first use.
+    const stmt =
+      (this.stmtGetMessages ??= this.db.prepare(
+        "SELECT role, text, tool_uses, tool_results, thinking, timestamp " +
+          "FROM messages WHERE session_id = ? ORDER BY message_index"
+      ));
+    const rows = stmt.all(sessionId) as Array<{
       role: string;
       text: string | null;
       tool_uses: string | null;
@@ -151,21 +176,35 @@ export class SessionStore {
       timestamp: string;
     }>;
 
-    return rows.map((row) => ({
-      role: row.role as "user" | "assistant" | "system",
-      text: row.text ?? undefined,
-      toolUses: row.tool_uses ? JSON.parse(row.tool_uses) : undefined,
-      toolResults: row.tool_results ? JSON.parse(row.tool_results) : undefined,
-      thinking: row.thinking ? JSON.parse(row.thinking) : undefined,
-      timestamp: row.timestamp,
-    }));
+    // Pre-allocate and use a plain for-loop to avoid the per-row closure
+    // allocation that Array.prototype.map performs.
+    const out: AgentMessage[] = new Array(rows.length);
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      out[i] = {
+        role: r.role as "user" | "assistant" | "system",
+        text: r.text ?? undefined,
+        toolUses: r.tool_uses ? JSON.parse(r.tool_uses) : undefined,
+        toolResults: r.tool_results ? JSON.parse(r.tool_results) : undefined,
+        thinking: r.thinking ? JSON.parse(r.thinking) : undefined,
+        timestamp: r.timestamp,
+      };
+    }
+    return out;
   }
 
   /** List all sessions. */
   listSessions(): StoredSession[] {
-    const rows = this.db
-      .prepare("SELECT * FROM sessions ORDER BY updated_at DESC")
-      .all() as Array<{
+    // Enumerate columns explicitly; SELECT * would also fetch no extra
+    // columns here, but being explicit avoids silently picking up future
+    // schema additions and keeps the row shape aligned with the mapper.
+    const stmt =
+      (this.stmtListSessions ??= this.db.prepare(
+        "SELECT session_id, agent_type, project_path, status, " +
+          "first_message_at, last_message_at, message_count, " +
+          "created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+      ));
+    const rows = stmt.all() as Array<{
       session_id: string;
       agent_type: string;
       project_path: string;
@@ -177,17 +216,22 @@ export class SessionStore {
       updated_at: string;
     }>;
 
-    return rows.map((row) => ({
-      sessionId: row.session_id,
-      agentType: row.agent_type,
-      projectPath: row.project_path,
-      status: row.status,
-      firstMessageAt: row.first_message_at,
-      lastMessageAt: row.last_message_at,
-      messageCount: row.message_count,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    const out: StoredSession[] = new Array(rows.length);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      out[i] = {
+        sessionId: row.session_id,
+        agentType: row.agent_type,
+        projectPath: row.project_path,
+        status: row.status,
+        firstMessageAt: row.first_message_at,
+        lastMessageAt: row.last_message_at,
+        messageCount: row.message_count,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    }
+    return out;
   }
 
   /** Close the database. */

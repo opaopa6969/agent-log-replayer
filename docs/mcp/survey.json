@@ -1,0 +1,132 @@
+{
+  "repo": "agent-log-replayer",
+  "surveyed_at": "2026-08-21T23:37:33Z",
+  "kind": "service",
+  "summary": "agent-log-broker が配信する LLM エージェントセッションイベントを受信し、SQLite に永続化してブラウザ（React + xterm.js）でリプレイ再生する常駐サービス。REST API と WebSocket を持つ。既に volta で https://replay.unlaxer.org としてホスト済み（catalog id: agent-log-replayer）。",
+  "decision": "wrap",
+  "decision_reason": "既に常駐サービスとして volta にホストされており、REST API（セッション一覧・詳細・タイムライン・ステータス）が存在する。エージェントから呼んで嬉しい読み取り系操作が 4 つ程度はっきり存在し、既存エンドポイントを薄く MCP で包めばよい。壊す系操作・長時間処理は今のところ無く、wrap が最小コストで価値を届ける。ただしブラウザ向けリプレイ UI 本体は人が見るものであり tool 化の対象外。library-serve ではない（既にサーバがある）。",
+  "existing": {
+    "http_api": true,
+    "cli": false,
+    "mcp": false,
+    "healthz": false,
+    "volta_manifest": false,
+    "hosted_url": "https://replay.unlaxer.org"
+  },
+  "proposed_namespace": "replay",
+  "capabilities": [
+    {
+      "verb": "セッション一覧を取得する",
+      "kind": "tool",
+      "name": "list_sessions",
+      "io": "{} → SessionSummary[] (sessionId, agentType, projectPath, status, messageCount, first/lastMessageAt, hasSecurityFlags, hasBannedWords)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/api/routes.ts:52 GET /api/sessions → sessionManager.getAllSessions()"
+    },
+    {
+      "verb": "セッション詳細（メッセージ全文）を取得する",
+      "kind": "tool",
+      "name": "get_session",
+      "io": "{sessionId} → ActiveSession (messages[], securityFlags[], bannedWordHits[], ...)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/api/routes.ts:71 GET /api/sessions/:id → sessionManager.getSession()"
+    },
+    {
+      "verb": "セッションのタイムラインイベント一覧を取得する",
+      "kind": "tool",
+      "name": "get_timeline",
+      "io": "{sessionId} → TimelineEvent[] (index, kind, label, durationFromPrev, messageIndex)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/api/routes.ts:84 GET /api/sessions/:id/timeline → buildTimeline()"
+    },
+    {
+      "verb": "replayer と broker の接続状態を取得する",
+      "kind": "tool",
+      "name": "status",
+      "io": "{} → { replayer, broker:{connected,brokerUrl}, subscribed, consumerId, sessionCount }",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/api/routes.ts:98 GET /api/status → brokerClient.checkStatus()"
+    },
+    {
+      "verb": "セキュリティ監査サマリを構築する",
+      "kind": "tool",
+      "name": "audit_summary",
+      "io": "{sessionId} → AuditSummary (critical/warning/info counts, bannedWordCount, flags[], bannedWordHits[], requiresReview)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/security/audit.ts:44 buildAuditSummary() — get_session 結果から集計。既存 REST エンドポイントなし、薄く追加"
+    },
+    {
+      "verb": "能力の仕様",
+      "kind": "resource",
+      "name": "spec",
+      "uri": "replay://spec"
+    },
+    {
+      "verb": "使い方",
+      "kind": "resource",
+      "name": "guide",
+      "uri": "replay://guide"
+    },
+    {
+      "verb": "broker から replayer へのイベント受信・永続化の手順",
+      "kind": "skill",
+      "name": "replay-ingest",
+      "locality": "service"
+    }
+  ],
+  "composition_examples": [
+    "index__agent_status で走行中のエージェントを確認 → replay__list_sessions でセッション一覧を取り → replay__get_timeline で該当セッションの進行を要約 → 別エージェントに引き継ぎ判断材料にする",
+    "replay__audit_summary で critical フラグが有るセッションを抽出 → volta__svc_logs で該当エージェントの生ログを照合 → セキュリティレビューを起票",
+    "replay__list_sessions → replay__get_session で完了済みセッションのメッセージ全文を取得 → kamishibai 用の台本素材として再利用"
+  ],
+  "dependencies": [
+    {
+      "repo": "agent-log-broker",
+      "direction": "depends_on",
+      "capability": "BrokerEvent 配信（POST /api/broker/callback）。broker が無くても起動は可能だが、セッション新規取得には必須",
+      "exists_now": true,
+      "note": "catalog に agent-log-broker として存在（MCP なし、hosted なし、port 3100 source runtime）。broker 側の MCP 化が進めば broker__subscribe 等と連携可能"
+    },
+    {
+      "repo": "claude-session-replay",
+      "direction": "depends_on",
+      "capability": "概念継承元（データモデル・ターミナル描画スタイル・再生モード・セキュリティフラグ分類）。コード依存は無し",
+      "exists_now": true,
+      "note": "catalog に claude-session-replay として存在（MCP なし、https://replay-hvu.unlaxer.org でホスト済み）。両者は類似能力を持つが、replayer は broker 経由のリアルタイム、session-replay はログファイル直接読み取り。重複領域あり"
+    },
+    {
+      "repo": "issue-broker",
+      "direction": "depends_on",
+      "capability": ".mcp.json に stdio MCP サーバとして登録済み（CURRENT_REPO=agent-log-replayer）。当リポジトリの issue 管理に使用",
+      "exists_now": true,
+      "note": "開発支援用であって replayer 本体の機能ではない。調査対象外"
+    }
+  ],
+  "library_serve": {
+    "needed": false,
+    "new_work": [],
+    "runtime": "node",
+    "estimated_effort": "S"
+  },
+  "risks": [
+    "POST /api/broker/callback に認証が無く、任意のクライアントが偽 BrokerEvent を送信可能。MCP 経由で外部に tool として公開するのは callback 入口ではなく読み取り系のみにすべき",
+    "SQLite ファイルにセッション全文（プロンプト・応答）が格納される。get_session tool は全文を返すため、秘密情報を含むセッションの内容が MCP 経由で漏れるリスク",
+    "WebSocket / REST にも認証なし。現在 localhost 前提だが、volta 公開 URL 経由で MCP を出す場合はアクセス制御に注意",
+    "consumerId が再起動ごとに変化する既知バグ（BUG-001）。broker にステールエントリが蓄積し、status tool の subscribed が実態と乖離する可能性",
+    "security_events テーブルへの書き込みが未実装（BUG-002）。再起動でセキュリティデータが消失するため audit_summary の結果は起動後分のみ",
+    "loadFromStore() が main() で呼ばれていないため、再起動直後は過去セッションが一覧に現れない。get_session も Not Found になる",
+    "ライセンス UNLICENSED。再配布不可"
+  ],
+  "open_questions": [
+    "replay と claude-session-replay は能力が重複する。エージェント向きはどちらを正とするか（broker リアルタイム vs ログファイル直接読み取り）。統合 or 役割分担の方針確認が要る",
+    "get_session は全文を返すが、巨大セッションでトークンを膨らませる。要約モードやメッセージ範囲指定を MCP tool に持たせるか",
+    "audit_summary は既存 REST に無い。MCP 用に新設するか、/api/sessions/:id に audit フィールドを足して get_session に含めるか",
+    "hosted_url はあるが healthz エンドポイントが無い。volta 参加規約の /healthz を実装するか、/api/status で代用させるか",
+    "volta.service.json が無いが catalog には登録済み。manifest を整備すべきか"
+  ]
+}
