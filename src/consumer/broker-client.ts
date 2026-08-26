@@ -6,7 +6,12 @@
  * and receives BrokerEvent via HTTP callback.
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { dirname } from "node:path";
+
 // Re-export broker types for convenience
+// SYNC WITH broker/src/types/broker-event.ts
 export interface BrokerEnvelope {
   version: string;
   messageId: string;
@@ -14,6 +19,7 @@ export interface BrokerEnvelope {
   deliveryAttempt: number;
 }
 
+// SYNC WITH broker/src/types/broker-event.ts
 export interface SessionMeta {
   sessionId: string;
   sessionPath: string;
@@ -21,11 +27,13 @@ export interface SessionMeta {
   agentType: string;
 }
 
+// SYNC WITH broker/src/types/broker-event.ts
 export interface IndexMeta {
   messageIndex: number;
   byteOffset: number;
 }
 
+// SYNC WITH broker/src/types/broker-event.ts
 export interface AgentMessage {
   role: "user" | "assistant" | "system";
   text?: string;
@@ -35,12 +43,14 @@ export interface AgentMessage {
   timestamp: string;
 }
 
+// SYNC WITH broker/src/types/broker-event.ts
 export type BrokerEventType =
   | "message"
   | "session.discovered"
   | "session.idle"
   | "session.lost";
 
+// SYNC WITH broker/src/types/broker-event.ts
 export interface BrokerEvent {
   _broker: BrokerEnvelope;
   _session: SessionMeta;
@@ -55,6 +65,23 @@ export interface BrokerClientConfig {
   brokerUrl: string;
   callbackUrl: string;
   consumerId?: string;
+}
+
+/**
+ * Get or create a persistent consumer ID.
+ *
+ * Priority: explicit arg > file > generate.
+ * Persists to `idFilePath` so the same consumerId is reused across restarts,
+ * preventing stale consumer accumulation in the broker registry (#10).
+ */
+export function getOrCreateConsumerId(idFilePath: string): string {
+  if (existsSync(idFilePath)) {
+    return readFileSync(idFilePath, "utf-8").trim();
+  }
+  const id = `agent-log-replayer-${randomUUID()}`;
+  mkdirSync(dirname(idFilePath), { recursive: true });
+  writeFileSync(idFilePath, id, "utf-8");
+  return id;
 }
 
 export class BrokerClient {
@@ -108,7 +135,7 @@ export class BrokerClient {
   /**
    * Check broker connection status.
    */
-    async checkStatus(): Promise<{ connected: boolean; brokerUrl: string }> {
+  async checkStatus(): Promise<{ connected: boolean; brokerUrl: string }> {
     try {
       const response = await fetch(`${this.config.brokerUrl}/api/status`, {
         signal: AbortSignal.timeout(3000),

@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Persistent broker consumer IDs with a `CONSUMER_ID` override (issue #10).
+- Startup restoration of archived sessions from SQLite (issue #8).
+- SPA fallback routing for direct browser URLs (issue #12).
+- Explicit broker type synchronization markers (issue #15).
+
+### Documentation
+
+- Updated the test inventory to 55 tests across 7 files (issue #5).
+- Recorded the implemented status of issues #8, #10, #12, and #15.
+
 ## [0.1.0] - 2026-04-19
 
 ### Added

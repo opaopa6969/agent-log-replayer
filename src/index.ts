@@ -9,8 +9,12 @@
 
 import express from "express";
 import { createServer } from "node:http";
+import { resolve } from "node:path";
 import { WebSocketServer } from "ws";
-import { BrokerClient } from "./consumer/broker-client.js";
+import {
+  BrokerClient,
+  getOrCreateConsumerId,
+} from "./consumer/broker-client.js";
 import { SessionManager } from "./consumer/session-manager.js";
 import { SessionStore } from "./storage/session-store.js";
 import { createRoutes } from "./api/routes.js";
@@ -22,6 +26,7 @@ export interface ServerConfig {
   brokerUrl: string;
   callbackUrl: string;
   dbPath: string;
+  consumerId?: string;
 }
 
 function loadConfig(): ServerConfig {
@@ -32,6 +37,7 @@ function loadConfig(): ServerConfig {
       process.env.CALLBACK_URL ??
       "http://localhost:3200/api/broker/callback",
     dbPath: process.env.DB_PATH ?? "./data/sessions.db",
+    consumerId: process.env.CONSUMER_ID,
   };
 }
 
@@ -48,6 +54,8 @@ async function main(): Promise<void> {
   const brokerClient = new BrokerClient({
     brokerUrl: config.brokerUrl,
     callbackUrl: config.callbackUrl,
+    consumerId:
+      config.consumerId ?? getOrCreateConsumerId("data/consumer-id.txt"),
   });
 
   // Express app
@@ -82,6 +90,15 @@ async function main(): Promise<void> {
 
   // Serve frontend static files in production
   app.use(express.static("frontend/dist"));
+
+  // SPA fallback for browser routes. Keep unknown API routes as 404s.
+  app.get("*", (req, res, next) => {
+    if (req.path === "/api" || req.path.startsWith("/api/")) {
+      next();
+      return;
+    }
+    res.sendFile(resolve("frontend/dist/index.html"));
+  });
 
   // Load archived sessions from storage (BUG-003 fix)
   await sessionManager.loadFromStore();

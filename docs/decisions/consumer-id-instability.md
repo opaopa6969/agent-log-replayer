@@ -1,8 +1,9 @@
 # Decision: consumerId Instability on Restart
 
-**Status:** BACKLOG — known bug, no fix implemented  
-**Filed:** 2026-04-19  
-**Affects:** `src/consumer/broker-client.ts`, broker consumer registry
+**Status:** Implemented — consumer ID persisted across restarts
+**Filed:** 2026-04-19
+**Resolved:** 2026-08-27 (GitHub issue #10)
+**Affects:** `src/consumer/broker-client.ts`, `src/index.ts`, broker consumer registry
 
 ---
 
@@ -38,7 +39,7 @@ npm start   # registers as agent-log-replayer-1713500001234 (new)
 
 The `consumerId` was chosen as `Date.now()` for simplicity during initial development. No persistence mechanism was implemented.
 
-## Proposed fix
+## Implemented fix
 
 Persist `consumerId` to a file on first start and reuse it on subsequent starts:
 
@@ -72,8 +73,12 @@ const client = new BrokerClient({
 });
 ```
 
-This is not implemented in the current codebase. The `src/index.ts` entry point uses the default (unstable) ID.
+The entry point now uses this priority order: `CONSUMER_ID` environment variable,
+then `./data/consumer-id.txt`, then a newly generated UUID. The generated value is
+persisted before the broker subscription is created.
 
-## BACKLOG
+## Resolution
 
-This is tracked as a known bug. Priority: medium. No regression impact as long as the broker handles stale consumers gracefully (returns 404 on unknown consumer unsubscribe, ignores delivery failures).
+`getOrCreateConsumerId()` creates the parent directory when necessary, writes a
+UUID-based ID once, and reuses the stored value on later starts. Unit tests cover
+creation, reuse, and explicit `BrokerClientConfig.consumerId` overrides.

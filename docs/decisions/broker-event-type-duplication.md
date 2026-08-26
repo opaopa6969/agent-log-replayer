@@ -1,7 +1,8 @@
 # Decision: BrokerEvent Type Duplication
 
-**Status:** Open risk — no resolution implemented  
-**Filed:** 2026-04-19  
+**Status:** Option C implemented — explicit sync markers added
+**Filed:** 2026-04-19
+**Resolved:** 2026-08-27 (GitHub issue #15)
 **Affects:** `src/consumer/broker-client.ts`
 
 ---
@@ -60,7 +61,10 @@ Cons: relies on human discipline; drift will happen eventually.
 
 ## Current state
 
-Option C is in effect (implicitly). No comment or process exists yet. **This is a BACKLOG item.**
+Option C is now explicit: every duplicated type has a
+`// SYNC WITH broker/src/types/broker-event.ts` marker. Broker contract changes
+must update both repositories and be recorded in the changelog. Option A remains
+a future cross-repository improvement.
 
 ## Affected files
 
