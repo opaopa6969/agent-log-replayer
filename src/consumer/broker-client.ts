@@ -137,7 +137,9 @@ export class BrokerClient {
    */
   async checkStatus(): Promise<{ connected: boolean; brokerUrl: string }> {
     try {
-      const response = await fetch(`${this.config.brokerUrl}/api/status`);
+      const response = await fetch(`${this.config.brokerUrl}/api/status`, {
+        signal: AbortSignal.timeout(3000),
+      });
       return {
         connected: response.ok,
         brokerUrl: this.config.brokerUrl,

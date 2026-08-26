@@ -1,8 +1,8 @@
 # Decision: BrokerEvent Type Duplication
 
-**Status:** Option C Implemented (2026-08-01) — `// SYNC WITH broker/src/types/broker-event.ts` comments added to all duplicated types in `src/consumer/broker-client.ts`. Option A (shared package) remains a future improvement tracked separately.
+**Status:** Option C implemented — explicit sync markers added
 **Filed:** 2026-04-19
-**Resolved:** 2026-08-01 (GitHub issue #15)
+**Resolved:** 2026-08-27 (GitHub issue #15)
 **Affects:** `src/consumer/broker-client.ts`
 
 ---
@@ -61,13 +61,10 @@ Cons: relies on human discipline; drift will happen eventually.
 
 ## Current state
 
-Option C is in effect (implicitly). No comment or process exists yet. **This is a BACKLOG item.**
-
-## Resolution (2026-08-01)
-
-Option C is now explicitly implemented. Each duplicated type in `src/consumer/broker-client.ts` carries a `// SYNC WITH broker/src/types/broker-event.ts` comment. When broker types change, update both sides and add a changelog entry.
-
-Option A (shared `@unlaxer/agent-log-types` package) remains a future improvement and will be tracked in a separate issue, as it requires changes to both the broker and replayer repositories.
+Option C is now explicit: every duplicated type has a
+`// SYNC WITH broker/src/types/broker-event.ts` marker. Broker contract changes
+must update both repositories and be recorded in the changelog. Option A remains
+a future cross-repository improvement.
 
 ## Affected files
 

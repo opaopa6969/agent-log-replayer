@@ -38,8 +38,9 @@ npm start
 You should see:
 
 ```
-[replayer] Listening on http://localhost:3200
-[replayer] Subscribed to broker as agent-log-replayer-1713500000000
+agent-log-replayer listening on port 3200
+WebSocket endpoint: ws://localhost:3200/ws
+Subscribed to broker at http://localhost:3100
 ```
 
 ## 4. Open the UI
@@ -68,7 +69,7 @@ Within a few seconds, the session should appear in the Session List.
 
 ## 7. Browse past sessions
 
-Past sessions are loaded from SQLite on startup. They appear in the Session List with `archived` status.
+Past sessions are persisted in SQLite. Startup restoration via `SessionManager.loadFromStore()` is not currently wired into the server entry point, so they do not appear in the Session List until restoration is implemented.
 
 Click any archived session to inspect its messages via the REST API:
 
@@ -104,4 +105,4 @@ Frontend changes hot-reload via Vite. Backend changes require restart.
 
 - **TerminalView**, **TimelineView**, and **SecurityPanel** are placeholder stubs — they render static shells only.
 - **consumerId** changes on every restart. This accumulates stale consumer records in the broker. See [decisions/consumer-id-instability.md](decisions/consumer-id-instability.md).
-- **Tests: 0.** There are no automated tests. Manual verification only.
+- The test suite currently contains 45 unit tests across five test files. Run them with `npm test -- --run`.

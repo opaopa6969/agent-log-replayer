@@ -1,0 +1,25 @@
+{
+  "id": "agent-log-replayer",
+  "name": "Agent Log Replayer",
+  "description": "Browser-based LLM session replayer consuming agent-log-broker events, with MCP backend (namespace: replay)",
+  "type": "node",
+  "hostname": "replay.unlaxer.org",
+  "port": 3200,
+  "host": "192.168.1.50",
+  "runtime": "systemd",
+  "exec_start": "/home/opa/agent-log-replayer/run.sh",
+  "user": "opa",
+  "auth": "minRole:MEMBER",
+  "health_check": "/healthz",
+  "tags": ["mcp", "replay", "llm", "browser", "websocket", "opa"],
+  "repo_url": "https://github.com/opaopa6969/agent-log-replayer",
+  "mcp": {
+    "enabled": true,
+    "port": 3200,
+    "path": "/mcp",
+    "namespace": "replay",
+    "min_role": "MEMBER",
+    "timeoutMs": 110000,
+    "description": "LLM エージェントセッションのリプレイ再生（読み取り系 MCP ラッパー）"
+  }
+}

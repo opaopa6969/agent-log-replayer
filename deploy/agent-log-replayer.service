@@ -1,0 +1,19 @@
+[Unit]
+Description=Agent Log Replayer (MCP backend: replay)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/opa/agent-log-replayer/run.sh
+Restart=on-failure
+RestartSec=5
+Environment=PORT=3200
+Environment=BROKER_URL=http://localhost:3100
+Environment=CALLBACK_URL=http://localhost:3200/api/broker/callback
+Environment=DB_PATH=/home/opa/agent-log-replayer/data/sessions.db
+EnvironmentFile=-/home/opa/volta-secrets/agent-log-replayer.env
+WorkingDirectory=/home/opa/agent-log-replayer
+
+[Install]
+WantedBy=default.target

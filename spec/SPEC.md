@@ -280,7 +280,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_session
 ```
 
 - `tool_uses`, `tool_results`, `thinking` は JSON 文字列として格納 (非正規化)。
-- `message_index` は `addMessage` 呼び出し時に `COUNT(*) WHERE session_id = ?` で算出する単調増加カウンタ。
+- `message_index` は `addMessage` 呼び出し時に `COALESCE(MAX(message_index), -1) + 1` で算出する単調増加カウンタ。
 - `getMessages` は `ORDER BY message_index` で取得し、JSON フィールドをデシリアライズして `AgentMessage[]` を返す。
 
 ---
@@ -471,7 +471,7 @@ interface BannedWordHit {
 
 ### 5.3 BrokerEvent 型二重定義問題
 
-**ステータス: Option C Implemented (2026-08-01, issue #15)**
+**ステータス: Option C Implemented (2026-08-27, issue #15)**
 
 `BrokerEvent`, `AgentMessage`, `BrokerEnvelope`, `SessionMeta`, `IndexMeta` は `src/consumer/broker-client.ts` にローカル定義されている。agent-log-broker の正規型定義と共有パッケージが存在しないため、手動同期が必要。
 
@@ -492,7 +492,7 @@ interface BannedWordHit {
 | B — JSON Schema から型生成 | broker が JSON Schema を公開し、`json-schema-to-typescript` で生成 | ★★ |
 | C — コメントによる手動同期 | `// SYNC WITH broker/src/types/broker-event.ts` を追記して人手で追跡 | ★ |
 
-2026-08-01 時点で Option C を実施済み。各型に `// SYNC WITH broker/src/types/broker-event.ts` コメントを付与。Option A は別 issue で計画。詳細: `docs/decisions/broker-event-type-duplication.md`
+Option C を実施済み。各型に `// SYNC WITH broker/src/types/broker-event.ts` を付与し、broker 側の契約変更時に手動同期する。Option A は別リポジトリも含む将来改善。詳細: `docs/decisions/broker-event-type-duplication.md`
 
 ---
 
@@ -868,31 +868,33 @@ interface SessionStoreState {
 
 ### 10.1 テスト
 
-**現状:** テスト 45 件 / 5 ファイル (`audit.test.ts`, `diff-renderer.test.ts`, `session-store.test.ts`, `terminal-renderer.test.ts`, `timeline-renderer.test.ts`)。
+**現状:** テスト 55 件 / 7 ファイル。
 
+- `tests/` に unit test 6 ファイルと MCP E2E test 1 ファイルが存在する。
 - `package.json` に `"test": "vitest"` スクリプトが定義されている。
 - `vitest` は `devDependencies` に含まれている。
 
 **対象テスト状況:**
 
-| コンポーネント | テスト優先度 | 状態 |
-|---------------|-------------|------|
-| `session-store.ts` (SQLite CRUD) | 高 | 実装済み (7 件) |
-| `session-manager.ts` (状態遷移) | 高 | 未実装 |
-| `terminal-renderer.ts` (ANSI 生成) | 中 | 実装済み (8 件) |
-| `timeline-renderer.ts` (イベント生成) | 中 | 実装済み (9 件) |
-| `audit.ts` (集計ロジック) | 中 | 実装済み (9 件) |
-| `diff-renderer.ts` (差分描画) | 中 | 実装済み (12 件) |
-| `broker-client.ts` (HTTP リクエスト) | 低 (要モック) | 未実装 |
-| REST API エンドポイント | 低 (要統合テスト) | 未実装 |
+| コンポーネント | テスト数 | 状態 |
+|---------------|---------:|------|
+| `session-store.ts` (SQLite CRUD) | 7 | 実装済み |
+| `terminal-renderer.ts` (ANSI 生成) | 8 | 実装済み |
+| `timeline-renderer.ts` (イベント生成) | 9 | 実装済み |
+| `diff-renderer.ts` (差分描画) | 12 | 実装済み |
+| `audit.ts` (集計ロジック) | 9 | 実装済み |
+| `broker-client.ts` (consumer ID) | 2 | 一部実装済み |
+| MCP E2E | 8 | 実装済み |
+| `session-manager.ts` (状態遷移) | 0 | 未実装 |
+| REST API エンドポイント | 0 | 未実装 |
 
 ---
 
 ### 10.2 consumerId 再起動ごと変化バグ
 
-**ステータス: Implemented (2026-08-01, issue #10)**
+**ステータス: Implemented (2026-08-27, issue #10)**
 
-`BrokerClient` の `consumerId` は `./data/consumer-id.txt` へ永続化され、再起動時に再利用される。`CONSUMER_ID` 環境変数でオーバーライド可能。優先度: env > file > generate。
+`consumerId` は `CONSUMER_ID` 環境変数、`./data/consumer-id.txt`、新規 UUID の順で決定する。新規生成した ID はファイルへ保存し、次回起動時に再利用する。
 
 ```typescript
 // src/consumer/broker-client.ts — 実装済み
@@ -917,17 +919,17 @@ export function getOrCreateConsumerId(idFilePath: string): string {
 
 ---
 
-### 10.4 SPA フォールバック未設定
+### 10.4 SPA フォールバック
 
-**ステータス: Implemented (2026-08-01, issue #12)**
+**ステータス: Implemented (2026-08-27, issue #12)**
 
-`frontend/dist` の静的配信後に `app.get("*", (_req, res) => res.sendFile("frontend/dist/index.html"))` の SPA フォールバックを追加済み。`/api/*` と `/ws` は先に登録されたルートで処理されるため影響を受けない。
+`frontend/dist` の静的配信後に SPA フォールバックを登録し、`/sessions/xxx` のような直接 URL を `index.html` へ解決する。未定義の `/api` パスはフォールバック対象外で 404 を維持する。
 
 ---
 
 ### 10.5 パフォーマンス特性
 
-- `SessionStore.addMessage` はメッセージ追加のたびに `COUNT(*) WHERE session_id = ?` を実行する。大量メッセージセッションでは `message_index` をアプリケーション側でキャッシュする方が効率的。
+- `SessionStore.addMessage` は末尾インデックスを `MAX(message_index)` で取得し、セッション別インデックスを利用して追加位置を算出する。
 - `SessionManager.getAllSessions()` はインメモリの `Map` を全スキャンする。セッション数が数万を超える場合はページネーションが必要。
 
 ---
@@ -936,7 +938,7 @@ export function getOrCreateConsumerId(idFilePath: string): string {
 
 ### 11.1 現状
 
-テストスイートは 45 件 / 5 ファイル (`audit.test.ts`, `diff-renderer.test.ts`, `session-store.test.ts`, `terminal-renderer.test.ts`, `timeline-renderer.test.ts`)。`session-manager.ts` と API 統合テストは未実装。
+テストスイートは 55 件 / 7 ファイル。ストレージ、renderer、audit、consumer ID、MCP E2E を検証している。`session-manager.ts` と REST API の統合テストは未実装。
 
 ### 11.2 推奨テスト構成
 
@@ -1350,7 +1352,7 @@ interface StoredSession {
 interface BrokerClientConfig {
   brokerUrl: string;
   callbackUrl: string;
-  consumerId?: string;  // 省略時は `agent-log-replayer-${Date.now()}`
+  consumerId?: string;  // entry point は env/file/generate で永続 ID を渡す
 }
 ```
 
@@ -1362,6 +1364,7 @@ interface ServerConfig {
   brokerUrl: string;
   callbackUrl: string;
   dbPath: string;
+  consumerId?: string;
 }
 ```
 
@@ -1371,19 +1374,19 @@ interface ServerConfig {
 
 | ID | 説明 | 優先度 | 影響ファイル | 状態 |
 |----|------|--------|-------------|------|
-| BUG-001 | consumerId 再起動ごと変化 → broker にステール登録が蓄積 | 中 | `src/consumer/broker-client.ts` | ✅ Resolved (issue #10, 2026-08-01) |
-| BUG-002 | security_events テーブルに書き込みが行われない → 再起動でセキュリティデータ消失 | 中 | `src/consumer/session-manager.ts`, `src/storage/session-store.ts` | OPEN (issue #7) |
-| BUG-003 | SPA フォールバック (`* → index.html`) が未設定 → 直接 URL アクセスで 404 | 低 | `src/index.ts` | ✅ Resolved (issue #12, 2026-08-01) |
-| BUG-004 | realtime / compressed playback mode が uniform と同一動作 | 低 | `frontend/src/components/SessionPlayer.tsx` | OPEN (issue #13) |
-| TODO-001 | TerminalView の xterm.js 統合 | 高 | `frontend/src/components/TerminalView.tsx` | OPEN (issue #9) |
-| TODO-002 | TimelineView のタイムラインフェッチ・描画 | 高 | `frontend/src/components/TimelineView.tsx` | OPEN (issue #9) |
-| TODO-003 | SecurityPanel のセキュリティデータ表示 | 中 | `frontend/src/components/SecurityPanel.tsx` | OPEN (issue #9) |
-| TODO-004 | テストスイートの整備 (現状 45 件) | 高 | `tests/` | 45 件実装済み / session-manager 未実装 |
-| TECH-001 | BrokerEvent 型二重定義 → 共有パッケージまたは型生成へ移行 | 中 | `src/consumer/broker-client.ts` | ✅ Option C Implemented (issue #15, 2026-08-01) |
-| TECH-002 | broker 再起動後の自動再サブスクライブ機能 | 低 | `src/consumer/broker-client.ts`, `src/index.ts` | OPEN |
-| TECH-003 | `addMessage` の message_index 採番に `COUNT(*)`使用 → 大量メッセージ時のパフォーマンス劣化 | 低 | `src/storage/session-store.ts` | OPEN (issue #16) |
-| TECH-004 | セッション削除 API の未実装 → DB の手動管理が必要 | 低 | `src/api/routes.ts`, `src/storage/session-store.ts` | OPEN |
-| TECH-005 | `loadFromStore()` が `main()` から未呼び出し → 過去セッション未復元 | 中 | `src/index.ts` | ✅ Resolved (issue #8, 2026-08-01) |
+| BUG-001 | consumerId 再起動ごと変化 → broker にステール登録が蓄積 | 中 | `src/consumer/broker-client.ts` | Resolved (#10) |
+| BUG-002 | security_events テーブルに書き込みが行われない → 再起動でセキュリティデータ消失 | 中 | `src/consumer/session-manager.ts`, `src/storage/session-store.ts` | Open (#7) |
+| BUG-003 | SPA フォールバック (`* → index.html`) が未設定 → 直接 URL アクセスで 404 | 低 | `src/index.ts` | Resolved (#12) |
+| BUG-004 | realtime / compressed playback mode が uniform と同一動作 | 低 | `frontend/src/components/SessionPlayer.tsx` | Open (#13) |
+| TODO-001 | TerminalView の xterm.js 統合 | 高 | `frontend/src/components/TerminalView.tsx` | Open (#9) |
+| TODO-002 | TimelineView のタイムラインフェッチ・描画 | 高 | `frontend/src/components/TimelineView.tsx` | Open (#9) |
+| TODO-003 | SecurityPanel のセキュリティデータ表示 | 中 | `frontend/src/components/SecurityPanel.tsx` | Open (#9) |
+| TODO-004 | テストスイートの整備 | 高 | `tests/` | 55件 / 7ファイル (#5) |
+| TECH-001 | BrokerEvent 型二重定義 → 共有パッケージまたは型生成へ移行 | 中 | `src/consumer/broker-client.ts` | Option C implemented (#15) |
+| TECH-002 | broker 再起動後の自動再サブスクライブ機能 | 低 | `src/consumer/broker-client.ts`, `src/index.ts` | Open (#18) |
+| TECH-003 | `addMessage` の message_index 採番に `COUNT(*)`使用 → 大量メッセージ時のパフォーマンス劣化 | 低 | `src/storage/session-store.ts` | Resolved (#16) |
+| TECH-004 | セッション削除 API の未実装 → DB の手動管理が必要 | 低 | `src/api/routes.ts`, `src/storage/session-store.ts` | Open (#19) |
+| TECH-005 | `loadFromStore()` が `main()` から未呼び出し | 中 | `src/index.ts` | Resolved (#8) |
 
 ---
 
@@ -1409,7 +1412,7 @@ flowchart TD
 flowchart TD
     HM["sessionManager.handleMessage(event)"]
     AM["store.addMessage(sessionId, event.message)"]
-    CNT["SELECT COUNT(*) WHERE session_id = ?<br/>(message_index 算出)"]
+    CNT["SELECT COALESCE(MAX(message_index), -1)<br/>(message_index 算出)"]
     INS["INSERT INTO messages (...)"]
     US["store.upsertSession(session)"]
     UPS["INSERT ... ON CONFLICT DO UPDATE SET ..."]
@@ -1441,7 +1444,7 @@ flowchart TD
     MAIN --> SUB --> POST
 ```
 
-**注記:** `loadFromStore()` は `main()` 内で呼び出し済み (2026-08-01, issue #8)。`src/index.ts` は `SessionManager` 構築後、broker subscribe 前に `await sessionManager.loadFromStore()` を実行し、アーカイブ済みセッションを `archived` ステータスでメモリに復元する。
+**注記:** `loadFromStore()` は `main()` 内で broker subscribe より前に呼び出される。SQLite の既存セッションは起動時に `archived` ステータスでメモリへ復元される (issue #8)。
 
 ---
 
