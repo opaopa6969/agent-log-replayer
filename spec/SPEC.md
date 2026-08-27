@@ -291,7 +291,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_session
 CREATE TABLE IF NOT EXISTS security_events (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id    TEXT NOT NULL,
+  message_id    TEXT,
   message_index INTEGER,
+  event_kind    TEXT,
+  event_index   INTEGER,
   flag_type     TEXT NOT NULL,
   detail        TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -300,9 +303,13 @@ CREATE TABLE IF NOT EXISTS security_events (
 
 CREATE INDEX IF NOT EXISTS idx_security_session
   ON security_events(session_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_security_message_event
+  ON security_events(session_id, message_id, event_kind, event_index)
+  WHERE message_id IS NOT NULL;
 ```
 
-**注記 — 現状の制限:** スキーマは定義済みだが、`SessionManager.handleMessage` は `securityFlags` / `bannedWordHits` をインメモリの `ActiveSession` に蓄積するのみで、`security_events` テーブルへの書き込みは**未実装**。テーブルは現在使用されていない。
+`message_id`・`event_kind`・`event_index` の組で broker 再送時の重複を排除する。旧スキーマには起動時の加算 migration で列を追加し、`message_id` がない旧行は保持する。
 
 ---
 
@@ -313,6 +320,8 @@ CREATE INDEX IF NOT EXISTS idx_security_session
 | `upsertSession` | `(session) => void` | セッションメタデータを insert または update |
 | `addMessage` | `(sessionId, message) => void` | メッセージ 1 件を追記 |
 | `getMessages` | `(sessionId) => AgentMessage[]` | セッション全メッセージを取得 |
+| `addSecurityEvent` | `(sessionId, messageId, messageIndex, eventKind, eventIndex, event) => boolean` | セキュリティ項目を冪等に追記。追加時のみ `true` |
+| `getSecurityEvents` | `(sessionId) => StoredSecurityEvents` | セキュリティフラグ・禁止ワードヒットを復元 |
 | `listSessions` | `() => StoredSession[]` | 全セッションを `updated_at DESC` で一覧 |
 | `close` | `() => void` | DB 接続を閉じる |
 
@@ -395,7 +404,7 @@ flowchart TD
     HM --> SA["status = 'active'"]
     HM --> AM["store.addMessage(...)"]
     HM --> US["store.upsertSession(...)"]
-    HM --> SEC["securityFlags / bannedWordHits<br/>をインメモリに蓄積"]
+    HM --> SEC["store.addSecurityEvent(...)<br/>追加成功時のみインメモリに蓄積"]
 
     ES --> NL["notifyListeners(event, session)"]
     HM --> NL
@@ -915,7 +924,9 @@ export function getOrCreateConsumerId(idFilePath: string): string {
 
 ### 10.3 セキュリティイベントの永続化欠落
 
-`security_events` テーブルはスキーマ定義済みだが、実際の書き込みが行われていない。セキュリティフラグ・禁止ワードヒットはインメモリのみで保持される。再起動すると消失する。
+**ステータス: Resolved (2026-08-27, issue #7)**
+
+`SessionManager.handleMessage` はセキュリティフラグ・禁止ワードヒットを `security_events` に保存し、`loadFromStore` が再起動時に復元する。broker の `messageId` とペイロード内の位置を冪等キーに使い、同じ配信の再送は重複登録しない。
 
 ---
 
@@ -1375,7 +1386,7 @@ interface ServerConfig {
 | ID | 説明 | 優先度 | 影響ファイル | 状態 |
 |----|------|--------|-------------|------|
 | BUG-001 | consumerId 再起動ごと変化 → broker にステール登録が蓄積 | 中 | `src/consumer/broker-client.ts` | Resolved (#10) |
-| BUG-002 | security_events テーブルに書き込みが行われない → 再起動でセキュリティデータ消失 | 中 | `src/consumer/session-manager.ts`, `src/storage/session-store.ts` | Open (#7) |
+| BUG-002 | security_events テーブルに書き込みが行われない → 再起動でセキュリティデータ消失 | 中 | `src/consumer/session-manager.ts`, `src/storage/session-store.ts` | Resolved (#7) |
 | BUG-003 | SPA フォールバック (`* → index.html`) が未設定 → 直接 URL アクセスで 404 | 低 | `src/index.ts` | Resolved (#12) |
 | BUG-004 | realtime / compressed playback mode が uniform と同一動作 | 低 | `frontend/src/components/SessionPlayer.tsx` | Open (#13) |
 | TODO-001 | TerminalView の xterm.js 統合 | 高 | `frontend/src/components/TerminalView.tsx` | Open (#9) |

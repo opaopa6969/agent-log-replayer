@@ -31,6 +31,6 @@ volta:
 
 ## トラブルシューティング
 
-- `consumerId` が再起動ごとに変化する既知バグ（BUG-001）。broker にステールエントリが蓄積する。
-- `security_events` テーブルへの書き込みが未実装（BUG-002）。再起動でセキュリティデータが消失。
+- `consumerId` はファイルに永続化され、再起動後も同じ ID を使う（BUG-001 対策）。
+- `security_events` は broker の `messageId` 単位で冪等に保存され、再起動時に復元される（BUG-002 対策）。
 - `loadFromStore()` はサーバ起動時に呼ばれる（BUG-003 対策）。再起動直後も過去セッションが一覧に出る。

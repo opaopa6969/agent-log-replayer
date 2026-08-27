@@ -193,6 +193,68 @@ describe("SessionStore", () => {
     });
   });
 
+  describe("security events", () => {
+    it("persists, restores, and deduplicates broker retries", () => {
+      store.upsertSession({
+        sessionId: "sess-security",
+        agentType: "claude-code",
+        projectPath: "/project",
+        status: "active",
+        firstMessageAt: null,
+        lastMessageAt: null,
+        messageCount: 0,
+      });
+      const flag = {
+        type: "suspicious-command",
+        severity: "warning",
+        description: "shell command",
+        messageIndex: 4,
+      };
+      const hit = {
+        word: "secret",
+        context: "a secret value",
+        messageIndex: 4,
+        field: "text",
+      };
+
+      expect(
+        store.addSecurityEvent(
+          "sess-security",
+          "message-1",
+          4,
+          "security_flag",
+          0,
+          flag
+        )
+      ).toBe(true);
+      expect(
+        store.addSecurityEvent(
+          "sess-security",
+          "message-1",
+          4,
+          "security_flag",
+          0,
+          flag
+        )
+      ).toBe(false);
+      expect(
+        store.addSecurityEvent(
+          "sess-security",
+          "message-1",
+          4,
+          "banned_word_hit",
+          0,
+          hit
+        )
+      ).toBe(true);
+
+      expect(store.getSecurityEvents("sess-security")).toEqual({
+        securityFlags: [flag],
+        bannedWordHits: [hit],
+      });
+    });
+  });
+
   describe("listSessions", () => {
     it("returns sessions ordered by updated_at DESC", () => {
       // Insert two sessions; second upsert will have a later updated_at
