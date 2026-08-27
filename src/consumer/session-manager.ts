@@ -105,14 +105,15 @@ export class SessionManager {
     const stored = this.store.listSessions();
     for (const s of stored) {
       if (!this.sessions.has(s.sessionId)) {
+        const securityEvents = this.store.getSecurityEvents(s.sessionId);
         this.sessions.set(s.sessionId, {
           sessionId: s.sessionId,
           agentType: s.agentType,
           projectPath: s.projectPath,
           status: "archived",
           messages: this.store.getMessages(s.sessionId),
-          securityFlags: [],
-          bannedWordHits: [],
+          securityFlags: securityEvents.securityFlags,
+          bannedWordHits: securityEvents.bannedWordHits,
           firstMessageAt: s.firstMessageAt,
           lastMessageAt: s.lastMessageAt,
           messageCount: s.messageCount,
@@ -164,12 +165,39 @@ export class SessionManager {
       this.store.upsertSession(session);
     }
 
-    // Accumulate security data
+    // Persist broker security data idempotently. A broker retry must not
+    // duplicate either SQLite rows or the live in-memory view.
     if (event.securityFlags) {
-      session.securityFlags.push(...event.securityFlags);
+      event.securityFlags.forEach((flag, eventIndex) => {
+        if (
+          this.store.addSecurityEvent(
+            session.sessionId,
+            event._broker.messageId,
+            getMessageIndex(flag, event),
+            "security_flag",
+            eventIndex,
+            flag
+          )
+        ) {
+          session.securityFlags.push(flag);
+        }
+      });
     }
     if (event.bannedWordHits) {
-      session.bannedWordHits.push(...event.bannedWordHits);
+      event.bannedWordHits.forEach((hit, eventIndex) => {
+        if (
+          this.store.addSecurityEvent(
+            session.sessionId,
+            event._broker.messageId,
+            getMessageIndex(hit, event),
+            "banned_word_hit",
+            eventIndex,
+            hit
+          )
+        ) {
+          session.bannedWordHits.push(hit);
+        }
+      });
     }
   }
 
@@ -190,4 +218,16 @@ export class SessionManager {
       }
     }
   }
+}
+
+function getMessageIndex(item: unknown, event: BrokerEvent): number | null {
+  if (
+    typeof item === "object" &&
+    item !== null &&
+    "messageIndex" in item &&
+    typeof (item as { messageIndex: unknown }).messageIndex === "number"
+  ) {
+    return (item as { messageIndex: number }).messageIndex;
+  }
+  return event._index?.messageIndex ?? null;
 }

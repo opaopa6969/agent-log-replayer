@@ -1,6 +1,6 @@
 # MCP 化ステータス — agent-log-replayer
 
-- **更新日時:** 2026-08-22T13:36:00Z
+- **更新日時:** 2026-08-27T13:50:00Z
 - **namespace:** `replay`
 - **state:** registered (deploy 完了)
 
@@ -64,10 +64,10 @@
 - `https://replay.unlaxer.org/healthz` → 200 `{"ok":true,"name":"agent-log-replayer","version":"0.1.0"}`
 - `catalog__describe_service("agent-log-replayer")` → `backend.status: "ready"`, `tools: 5`, `server.name: "agent-log-replayer"`
 
-## 既知バグ（今回の対象外）
+## 既知バグと解消状況
 
-- **BUG-001:** consumerId が再起動ごとに変化。broker にステールエントリ蓄積。
-- **BUG-002:** security_events テーブルへの書き込みが未実装。再起動でセキュリティデータ消失。
+- **BUG-001:** consumerId 永続化により解消済み（issue #10）。
+- **BUG-002:** security_events の冪等保存・再起動時復元により解消済み（issue #7）。
 - **BUG-003:** `loadFromStore()` が `main()` で呼ばれていない → **今回修正済み**（起動時に呼ぶように変更）
 
 ## 未決事項

@@ -22,6 +22,13 @@ export interface StoredSession {
   updatedAt: string;
 }
 
+export type SecurityEventKind = "security_flag" | "banned_word_hit";
+
+export interface StoredSecurityEvents {
+  securityFlags: unknown[];
+  bannedWordHits: unknown[];
+}
+
 export class SessionStore {
   private db: Database.Database;
   // Cached prepared statements. better-sqlite3's prepare() is cheap but not
@@ -33,6 +40,8 @@ export class SessionStore {
   private stmtNextMessageIndex?: Database.Statement;
   private stmtGetMessages?: Database.Statement;
   private stmtListSessions?: Database.Statement;
+  private stmtInsertSecurityEvent?: Database.Statement;
+  private stmtGetSecurityEvents?: Database.Statement;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -76,7 +85,10 @@ export class SessionStore {
       CREATE TABLE IF NOT EXISTS security_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
+        message_id TEXT,
         message_index INTEGER,
+        event_kind TEXT,
+        event_index INTEGER,
         flag_type TEXT NOT NULL,
         detail TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -85,6 +97,31 @@ export class SessionStore {
 
       CREATE INDEX IF NOT EXISTS idx_security_session
         ON security_events(session_id);
+    `);
+
+    // security_events existed before persistence was implemented. Additive
+    // ALTERs preserve any existing database instead of requiring recreation.
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(security_events)").all() as Array<{
+        name: string;
+      }>).map((column) => column.name)
+    );
+    if (!columns.has("message_id")) {
+      this.db.exec("ALTER TABLE security_events ADD COLUMN message_id TEXT");
+    }
+    if (!columns.has("event_kind")) {
+      this.db.exec("ALTER TABLE security_events ADD COLUMN event_kind TEXT");
+    }
+    if (!columns.has("event_index")) {
+      this.db.exec("ALTER TABLE security_events ADD COLUMN event_index INTEGER");
+    }
+
+    // Legacy rows have no message_id and remain untouched. Broker-delivered
+    // rows are idempotent per message, kind, and position in the payload.
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_security_message_event
+        ON security_events(session_id, message_id, event_kind, event_index)
+        WHERE message_id IS NOT NULL
     `);
   }
 
@@ -191,6 +228,69 @@ export class SessionStore {
       };
     }
     return out;
+  }
+
+  /** Persist one broker-provided security item. Returns false for a retry. */
+  addSecurityEvent(
+    sessionId: string,
+    messageId: string,
+    messageIndex: number | null,
+    eventKind: SecurityEventKind,
+    eventIndex: number,
+    event: unknown
+  ): boolean {
+    const flagType =
+      eventKind === "security_flag" &&
+      typeof event === "object" &&
+      event !== null &&
+      "type" in event
+        ? String((event as { type: unknown }).type)
+        : "banned_word";
+    const stmt =
+      (this.stmtInsertSecurityEvent ??= this.db.prepare(`
+        INSERT OR IGNORE INTO security_events
+          (session_id, message_id, message_index, event_kind, event_index,
+            flag_type, detail)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `));
+    const result = stmt.run(
+      sessionId,
+      messageId,
+      messageIndex,
+      eventKind,
+      eventIndex,
+      flagType,
+      JSON.stringify(event) ?? "null"
+    );
+    return result.changes > 0;
+  }
+
+  /** Restore the raw security payloads for a session. */
+  getSecurityEvents(sessionId: string): StoredSecurityEvents {
+    const stmt =
+      (this.stmtGetSecurityEvents ??= this.db.prepare(`
+        SELECT event_kind, detail
+        FROM security_events
+        WHERE session_id = ? AND event_kind IS NOT NULL
+        ORDER BY message_index, event_index, id
+      `));
+    const rows = stmt.all(sessionId) as Array<{
+      event_kind: SecurityEventKind;
+      detail: string | null;
+    }>;
+    const result: StoredSecurityEvents = {
+      securityFlags: [],
+      bannedWordHits: [],
+    };
+    for (const row of rows) {
+      const event: unknown = row.detail ? JSON.parse(row.detail) : null;
+      if (row.event_kind === "security_flag") {
+        result.securityFlags.push(event);
+      } else if (row.event_kind === "banned_word_hit") {
+        result.bannedWordHits.push(event);
+      }
+    }
+    return result;
   }
 
   /** List all sessions. */
