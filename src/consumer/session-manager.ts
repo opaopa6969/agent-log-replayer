@@ -7,7 +7,7 @@
  */
 
 import type { BrokerEvent, AgentMessage } from "./broker-client.js";
-import type { SessionStore, StoredSession } from "../storage/session-store.js";
+import type { SessionStore } from "../storage/session-store.js";
 
 export type SessionStatus = "active" | "idle" | "lost" | "archived";
 

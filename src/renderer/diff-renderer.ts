@@ -37,7 +37,7 @@ export function buildEditDiff(
   filePath: string,
   oldString: string,
   newString: string,
-  contextLines = 3
+  _contextLines = 3
 ): FileDiff {
   const oldLines = oldString.split("\n");
   const newLines = newString.split("\n");
