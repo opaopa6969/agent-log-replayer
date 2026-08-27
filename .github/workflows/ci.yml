@@ -25,5 +25,8 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Lint
+        run: npm run lint
+
       - name: Run tests
-        run: npm test -- --run || true
+        run: npm test -- --run
