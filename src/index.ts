@@ -103,13 +103,30 @@ async function main(): Promise<void> {
   // Load archived sessions from storage (BUG-003 fix)
   await sessionManager.loadFromStore();
 
-  // Subscribe to broker on startup
+  // Subscribe to broker on startup. If the broker is not yet available
+  // the periodic health check below will re-subscribe when it recovers.
   try {
     await brokerClient.subscribe();
     console.log(`Subscribed to broker at ${config.brokerUrl}`);
   } catch (err) {
-    console.warn("Failed to subscribe to broker (will retry):", err);
+    console.warn(
+      "Failed to subscribe to broker on startup; will retry via health check:",
+      err
+    );
   }
+
+  // Periodic health check: if the broker restarts or the connection drops,
+  // ensureSubscribed() re-registers this consumer (TECH-002).
+  const healthCheckIntervalMs = 30_000;
+  const healthCheckTimer = setInterval(async () => {
+    const result = await brokerClient.ensureSubscribed();
+    if (result.reconnected) {
+      console.log("Re-subscribed to broker after connection drop");
+    } else if (!result.subscribed) {
+      console.warn("Broker still unreachable; will retry on next health check");
+    }
+  }, healthCheckIntervalMs);
+  healthCheckTimer.unref();
 
   server.listen(config.port, "0.0.0.0", () => {
     console.log(`agent-log-replayer listening on port ${config.port}`);
@@ -117,6 +134,20 @@ async function main(): Promise<void> {
     console.log(`MCP endpoint: http://localhost:${config.port}/mcp`);
     console.log(`Health: http://localhost:${config.port}/healthz`);
   });
+
+  // Graceful shutdown: clear the health check and unsubscribe on exit.
+  const shutdown = async (signal: string) => {
+    console.log(`Received ${signal}, shutting down...`);
+    clearInterval(healthCheckTimer);
+    try {
+      await brokerClient.unsubscribe();
+    } catch (err) {
+      console.warn("Error during unsubscribe on shutdown:", err);
+    }
+    server.close(() => process.exit(0));
+  };
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
 main().catch((err) => {
