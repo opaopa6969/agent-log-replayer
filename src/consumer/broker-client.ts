@@ -119,6 +119,33 @@ export class BrokerClient {
   }
 
   /**
+   * Ensure the broker subscription is active, reconnecting if necessary.
+   *
+   * Used by the periodic health check in index.ts to recover after a
+   * broker restart, transient network failure, or delivery error.
+   * - If already subscribed AND the broker is reachable, this is a no-op.
+   * - If not subscribed OR the broker is unreachable, attempt to re-subscribe.
+   *
+   * Returns the resulting subscription state.
+   */
+  async ensureSubscribed(): Promise<{
+    subscribed: boolean;
+    reconnected: boolean;
+  }> {
+    const status = await this.checkStatus();
+    if (this.subscribed && status.connected) {
+      return { subscribed: true, reconnected: false };
+    }
+
+    try {
+      await this.subscribe();
+      return { subscribed: true, reconnected: true };
+    } catch {
+      return { subscribed: false, reconnected: false };
+    }
+  }
+
+  /**
    * Unsubscribe from the broker.
    */
   async unsubscribe(): Promise<void> {

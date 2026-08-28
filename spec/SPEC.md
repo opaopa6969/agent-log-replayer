@@ -1394,7 +1394,7 @@ interface ServerConfig {
 | TODO-003 | SecurityPanel のセキュリティデータ表示 | 中 | `frontend/src/components/SecurityPanel.tsx` | Open (#9) |
 | TODO-004 | テストスイートの整備 | 高 | `tests/` | 55件 / 7ファイル (#5) |
 | TECH-001 | BrokerEvent 型二重定義 → 共有パッケージまたは型生成へ移行 | 中 | `src/consumer/broker-client.ts` | Option C implemented (#15) |
-| TECH-002 | broker 再起動後の自動再サブスクライブ機能 | 低 | `src/consumer/broker-client.ts`, `src/index.ts` | Open (#18) |
+| TECH-002 | broker 再起動後の自動再サブスクライブ機能 | 低 | `src/consumer/broker-client.ts`, `src/index.ts` | Resolved (#18) |
 | TECH-003 | `addMessage` の message_index 採番に `COUNT(*)`使用 → 大量メッセージ時のパフォーマンス劣化 | 低 | `src/storage/session-store.ts` | Resolved (#16) |
 | TECH-004 | セッション削除 API の未実装 → DB の手動管理が必要 | 低 | `src/api/routes.ts`, `src/storage/session-store.ts` | Open (#19) |
 | TECH-005 | `loadFromStore()` が `main()` から未呼び出し | 中 | `src/index.ts` | Resolved (#8) |
