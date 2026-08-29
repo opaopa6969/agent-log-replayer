@@ -11,6 +11,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Startup restoration of archived sessions from SQLite (issue #8).
 - SPA fallback routing for direct browser URLs (issue #12).
 - Explicit broker type synchronization markers (issue #15).
+- Live UI updates for new sessions via `session.discovered` events (issue #26).
+
+### Fixed
+
+- Deduplicate broker-retried message bodies in SQLite and in-memory state
+  via a `messages.message_id` unique index mirroring the security_events
+  pattern (issue #25).
+- Stop bumping `messageCount` and overwriting `status` on `session.idle` /
+  `session.lost` events in the browser store (issue #27).
 
 ### Documentation
 
