@@ -301,4 +301,23 @@ describe("SessionStore", () => {
       expect(sessions).toHaveLength(0);
     });
   });
+
+  describe("addMessage foreign-key guard", () => {
+    it("rejects a message for a session that was never upserted", () => {
+      // messages.session_id has a FOREIGN KEY referencing sessions.
+      // A message for an unknown session must not silently succeed;
+      // otherwise orphan rows would accumulate and getMessages would
+      // return data for sessions that never existed.
+      const msg: AgentMessage = {
+        role: "user",
+        text: "orphan",
+        timestamp: "2026-04-23T10:00:00.000Z",
+      };
+      expect(() => store.addMessage("never-upserted", msg)).toThrow(
+        /FOREIGN KEY/i
+      );
+      // Nothing should have been written.
+      expect(store.getMessages("never-upserted")).toHaveLength(0);
+    });
+  });
 });

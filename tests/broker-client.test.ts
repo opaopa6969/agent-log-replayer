@@ -129,3 +129,26 @@ describe("BrokerClient.ensureSubscribed", () => {
     expect(client.isSubscribed()).toBe(false);
   });
 });
+
+describe("BrokerClient.checkStatus", () => {
+  it("returns connected:false and never throws when fetch rejects", async () => {
+    const client = new BrokerClient({
+      brokerUrl: "http://broker:3100",
+      callbackUrl: "http://localhost:3200/api/broker/callback",
+      consumerId: "c4",
+    });
+    // fetch rejects (network error / DNS failure / timeout). The health
+    // check in index.ts relies on this swallowing errors rather than
+    // throwing and crashing the periodic timer.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("fetch failed");
+      }),
+    );
+
+    const status = await client.checkStatus();
+    expect(status.connected).toBe(false);
+    expect(status.brokerUrl).toBe("http://broker:3100");
+  });
+});

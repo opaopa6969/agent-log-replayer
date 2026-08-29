@@ -133,4 +133,23 @@ describe("extractDiffsFromToolUses", () => {
     // None should produce a diff (no filePath)
     expect(diffs).toHaveLength(0);
   });
+
+  it("skips Edit when both old_string and new_string are empty", () => {
+    // Guard in extractDiffsFromToolUses: `if (filePath && (oldStr || newStr))`.
+    // When both strings are empty there is nothing to diff; emitting an
+    // empty hunk would pollute the DiffView. Regression-prone because the
+    // truthiness check is easy to drop during refactors.
+    const toolUses = [
+      {
+        name: "Edit",
+        input: {
+          file_path: "/src/foo.ts",
+          old_string: "",
+          new_string: "",
+        },
+      },
+    ];
+    const diffs = extractDiffsFromToolUses(toolUses);
+    expect(diffs).toHaveLength(0);
+  });
 });
