@@ -222,3 +222,102 @@ describe("SessionManager security persistence", () => {
     store.close();
   });
 });
+
+describe("SessionManager lifecycle events", () => {
+  it("session.idle transitions an active session to idle and persists", () => {
+    const directory = mkdtempSync(join(tmpdir(), "replayer-idle-"));
+    temporaryDirectories.push(directory);
+    const dbPath = join(directory, "sessions.db");
+
+    const store = new SessionStore(dbPath);
+    const manager = new SessionManager(store);
+
+    // Seed the session via session.discovered, then send a message so it
+    // exists in-memory and in the store with status "active".
+    const discovered: BrokerEvent = {
+      _broker: {
+        version: "1",
+        messageId: "m-disc",
+        deliveredAt: "2026-08-29T00:00:00.000Z",
+        deliveryAttempt: 1,
+      },
+      _session: {
+        sessionId: "sess-lifecycle",
+        sessionPath: "/sessions/lifecycle",
+        projectPath: "/project",
+        agentType: "claude-code",
+      },
+      _index: { messageIndex: 0, byteOffset: 0 },
+      type: "session.discovered",
+    };
+    manager.handleEvent(discovered);
+    expect(manager.getSession("sess-lifecycle")?.status).toBe("active");
+
+    // Send session.idle — should flip status without adding messages.
+    manager.handleEvent({ ...discovered, type: "session.idle" });
+    expect(manager.getSession("sess-lifecycle")?.status).toBe("idle");
+    expect(manager.getSession("sess-lifecycle")?.messageCount).toBe(0);
+
+    // Status should be reflected in the store too (reload from disk).
+    store.close();
+    const reopened = new SessionStore(dbPath);
+    const reopenedManager = new SessionManager(reopened);
+    reopenedManager.loadFromStore();
+    expect(reopenedManager.getSession("sess-lifecycle")?.status).toBe("archived");
+    reopened.close();
+  });
+
+  it("session.lost transitions an active session to lost", () => {
+    const store = new SessionStore(":memory:");
+    const manager = new SessionManager(store);
+
+    const base: BrokerEvent = {
+      _broker: {
+        version: "1",
+        messageId: "m-lost",
+        deliveredAt: "2026-08-29T00:00:00.000Z",
+        deliveryAttempt: 1,
+      },
+      _session: {
+        sessionId: "sess-lost",
+        sessionPath: "/sessions/lost",
+        projectPath: "/project",
+        agentType: "claude-code",
+      },
+      _index: { messageIndex: 0, byteOffset: 0 },
+      type: "session.discovered",
+    };
+    manager.handleEvent(base);
+    expect(manager.getSession("sess-lost")?.status).toBe("active");
+
+    manager.handleEvent({ ...base, type: "session.lost" });
+    expect(manager.getSession("sess-lost")?.status).toBe("lost");
+    store.close();
+  });
+
+  it("session.idle on an unknown session is a no-op (no session created)", () => {
+    const store = new SessionStore(":memory:");
+    const manager = new SessionManager(store);
+
+    manager.handleEvent({
+      _broker: {
+        version: "1",
+        messageId: "m-unknown",
+        deliveredAt: "2026-08-29T00:00:00.000Z",
+        deliveryAttempt: 1,
+      },
+      _session: {
+        sessionId: "never-seen",
+        sessionPath: "/sessions/never",
+        projectPath: "/project",
+        agentType: "claude-code",
+      },
+      _index: { messageIndex: 0, byteOffset: 0 },
+      type: "session.idle",
+    });
+    // updateStatus() only mutates existing sessions; it must not create one.
+    expect(manager.getSession("never-seen")).toBeUndefined();
+    expect(manager.getAllSessions()).toHaveLength(0);
+    store.close();
+  });
+});

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildTimeline,
+  computeSessionDuration,
 } from "../src/renderer/timeline-renderer.js";
 import type { AgentMessage } from "../src/consumer/broker-client.js";
 
@@ -100,5 +101,26 @@ describe("buildTimeline", () => {
     const events = buildTimeline(messages);
     expect(events[0].messageIndex).toBe(0);
     expect(events[1].messageIndex).toBe(1);
+  });
+});
+
+describe("computeSessionDuration", () => {
+  it("returns null for empty messages", () => {
+    expect(computeSessionDuration([])).toBeNull();
+  });
+
+  it("returns null for a single message (boundary: less than 2)", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", text: "solo", timestamp: "2026-04-23T10:00:00.000Z" },
+    ];
+    expect(computeSessionDuration(messages)).toBeNull();
+  });
+
+  it("returns elapsed ms between first and last message", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", text: "first", timestamp: "2026-04-23T10:00:00.000Z" },
+      { role: "assistant", text: "last", timestamp: "2026-04-23T10:00:10.000Z" },
+    ];
+    expect(computeSessionDuration(messages)).toBe(10_000);
   });
 });
