@@ -75,8 +75,11 @@ async function main(): Promise<void> {
   // HTTP server (shared between Express and WebSocket)
   const server = createServer(app);
 
-  // WebSocket server for browser clients
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  // WebSocket server for browser clients.
+  // maxPayload caps received frame size. Client→server messages are only
+  // subscribe/unsubscribe (< 100 bytes); 1 MiB is a generous ceiling that
+  // rejects oversized frames before JSON.parse allocates memory for them.
+  const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 1 << 20 });
   const wsHandler = setupWebSocket(wss, sessionManager);
 
   // REST API routes
