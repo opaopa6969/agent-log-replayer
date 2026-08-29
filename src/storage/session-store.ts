@@ -37,6 +37,7 @@ export class SessionStore {
   // so the constructor stays side-effect-free for schema setup.
   private stmtUpsertSession?: Database.Statement;
   private stmtInsertMessage?: Database.Statement;
+  private stmtInsertBrokerMessage?: Database.Statement;
   private stmtNextMessageIndex?: Database.Statement;
   private stmtGetMessages?: Database.Statement;
   private stmtListSessions?: Database.Statement;
@@ -75,6 +76,7 @@ export class SessionStore {
         tool_results TEXT,
         thinking TEXT,
         timestamp TEXT NOT NULL DEFAULT '',
+        message_id TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (session_id) REFERENCES sessions(session_id)
       );
@@ -123,6 +125,27 @@ export class SessionStore {
         ON security_events(session_id, message_id, event_kind, event_index)
         WHERE message_id IS NOT NULL
     `);
+
+    // messages existed before broker-retry idempotency was added. Add the
+    // message_id column additively so existing databases keep working.
+    const messageColumns = new Set(
+      (this.db.prepare("PRAGMA table_info(messages)").all() as Array<{
+        name: string;
+      }>).map((column) => column.name)
+    );
+    if (!messageColumns.has("message_id")) {
+      this.db.exec("ALTER TABLE messages ADD COLUMN message_id TEXT");
+    }
+
+    // Broker retries must not duplicate message rows. A partial unique index
+    // mirrors the security_events pattern: legacy rows without a message_id
+    // stay untouched, while broker-delivered rows are deduplicated per
+    // (session_id, message_id).
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_broker_message
+        ON messages(session_id, message_id)
+        WHERE message_id IS NOT NULL
+    `);
   }
 
   /** Upsert session metadata. */
@@ -159,31 +182,45 @@ export class SessionStore {
     );
   }
 
-  /** Add a message to a session. */
-  addMessage(sessionId: string, message: AgentMessage): void {
+  /** Add a message to a session. Returns false when a broker retry is ignored. */
+  addMessage(sessionId: string, message: AgentMessage, messageId?: string): boolean {
+    // Broker-delivered messages carry a message_id and are deduplicated via
+    // idx_messages_broker_message. Messages without a message_id (legacy or
+    // locally injected) bypass the guard and are always inserted.
+    if (messageId) {
+      const stmt =
+        (this.stmtInsertBrokerMessage ??= this.db.prepare(`
+          INSERT OR IGNORE INTO messages (session_id, message_index, role, text,
+            tool_uses, tool_results, thinking, timestamp, message_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `));
+      const result = stmt.run(
+        sessionId,
+        this.nextMessageIndex(sessionId),
+        message.role,
+        message.text ?? null,
+        message.toolUses ? JSON.stringify(message.toolUses) : null,
+        message.toolResults ? JSON.stringify(message.toolResults) : null,
+        message.thinking ? JSON.stringify(message.thinking) : null,
+        message.timestamp,
+        messageId
+      );
+      return result.changes > 0;
+    }
+
     // Use MAX(message_index) instead of COUNT(*) to determine the next index.
     // MAX() resolves to the last entry of idx_messages_session, making it
     // O(log N) rather than the O(N) index-only scan that COUNT(*) requires.
     // See SPEC.md §10.5 (TECH-003) for the original hotspot.
-    const idxStmt =
-      (this.stmtNextMessageIndex ??= this.db.prepare(
-        "SELECT COALESCE(MAX(message_index), -1) AS last_idx " +
-          "FROM messages WHERE session_id = ?"
-      ));
-    const row = idxStmt.get(sessionId) as { last_idx: number } | undefined;
-
-    const nextIndex = (row?.last_idx ?? -1) + 1;
-
     const stmt =
       (this.stmtInsertMessage ??= this.db.prepare(`
         INSERT INTO messages (session_id, message_index, role, text,
           tool_uses, tool_results, thinking, timestamp)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `));
-
     stmt.run(
       sessionId,
-      nextIndex,
+      this.nextMessageIndex(sessionId),
       message.role,
       message.text ?? null,
       message.toolUses ? JSON.stringify(message.toolUses) : null,
@@ -191,6 +228,17 @@ export class SessionStore {
       message.thinking ? JSON.stringify(message.thinking) : null,
       message.timestamp
     );
+    return true;
+  }
+
+  private nextMessageIndex(sessionId: string): number {
+    const idxStmt =
+      (this.stmtNextMessageIndex ??= this.db.prepare(
+        "SELECT COALESCE(MAX(message_index), -1) AS last_idx " +
+          "FROM messages WHERE session_id = ?"
+      ));
+    const row = idxStmt.get(sessionId) as { last_idx: number } | undefined;
+    return (row?.last_idx ?? -1) + 1;
   }
 
   /** Get all messages for a session. */

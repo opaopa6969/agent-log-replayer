@@ -151,18 +151,26 @@ export class SessionManager {
   private handleMessage(event: BrokerEvent): void {
     const session = this.ensureSession(event);
 
+    // Persist broker message idempotently. A broker retry must not
+    // duplicate either SQLite rows or the live in-memory view. The store
+    // deduplicates by _broker.messageId; when it rejects a retry we skip
+    // the in-memory push and messageCount bump as well.
     if (event.message) {
-      session.messages.push(event.message);
-      session.messageCount++;
-      session.lastMessageAt = event.message.timestamp;
-      if (!session.firstMessageAt) {
-        session.firstMessageAt = event.message.timestamp;
+      const inserted = this.store.addMessage(
+        session.sessionId,
+        event.message,
+        event._broker.messageId
+      );
+      if (inserted) {
+        session.messages.push(event.message);
+        session.messageCount++;
+        session.lastMessageAt = event.message.timestamp;
+        if (!session.firstMessageAt) {
+          session.firstMessageAt = event.message.timestamp;
+        }
+        session.status = "active";
+        this.store.upsertSession(session);
       }
-      session.status = "active";
-
-      // Persist message
-      this.store.addMessage(session.sessionId, event.message);
-      this.store.upsertSession(session);
     }
 
     // Persist broker security data idempotently. A broker retry must not
