@@ -23,6 +23,7 @@ import { createMcpHandler } from "./mcp/server.js";
 
 export interface ServerConfig {
   port: number;
+  bindHost: string;
   brokerUrl: string;
   callbackUrl: string;
   dbPath: string;
@@ -32,6 +33,9 @@ export interface ServerConfig {
 function loadConfig(): ServerConfig {
   return {
     port: parseInt(process.env.PORT ?? "3200", 10),
+    // The API, WebSocket, and MCP endpoints do not provide authentication.
+    // Keep the server local by default; publishing it must be an explicit choice.
+    bindHost: process.env.BIND_HOST ?? "127.0.0.1",
     brokerUrl: process.env.BROKER_URL ?? "http://localhost:3100",
     callbackUrl:
       process.env.CALLBACK_URL ??
@@ -131,8 +135,10 @@ async function main(): Promise<void> {
   }, healthCheckIntervalMs);
   healthCheckTimer.unref();
 
-  server.listen(config.port, "0.0.0.0", () => {
-    console.log(`agent-log-replayer listening on port ${config.port}`);
+  server.listen(config.port, config.bindHost, () => {
+    console.log(
+      `agent-log-replayer listening on ${config.bindHost}:${config.port}`
+    );
     console.log(`WebSocket endpoint: ws://localhost:${config.port}/ws`);
     console.log(`MCP endpoint: http://localhost:${config.port}/mcp`);
     console.log(`Health: http://localhost:${config.port}/healthz`);

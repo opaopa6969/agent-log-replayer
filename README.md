@@ -224,6 +224,7 @@ The three placeholder components render static UI shells with `// TODO` comments
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3200` | HTTP/WebSocket server port |
+| `BIND_HOST` | `127.0.0.1` | Network interface for HTTP/WebSocket/MCP (set explicitly to expose the server) |
 | `BROKER_URL` | `http://localhost:3100` | agent-log-broker URL |
 | `CALLBACK_URL` | `http://localhost:3200/api/broker/callback` | Callback URL registered with broker |
 | `DB_PATH` | `./data/sessions.db` | SQLite database path |
